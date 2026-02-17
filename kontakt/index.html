@@ -14,7 +14,7 @@
   <div class="container nav">
     <a href="index.html" class="logo">ESPORTSERIEN</a>
     <nav>
-      <a href="/">
+      <a href="index.html">Forside</a>
     </nav>
   </div>
 </header>
@@ -26,7 +26,7 @@
       <h1>Kontakt Os</h1>
       <p>
         Er du et ambitiøst hold, en spiller eller en virksomhed,
-        der er interesseret i Esportserien?
+		der er interesseret i Esportserien?
       </p>
 
       <div class="info-block">
@@ -46,29 +46,24 @@
     </div>
 
     <div class="contact-form">
-      <form action="https://formspree.io/f/xqedbrzk" method="POST">
-
+      <form>
         <label>Navn / Organisation</label>
-        <input type="text" name="navn" required>
+        <input type="text" required>
 
         <label>Email</label>
-        <input type="email" name="email" required>
+        <input type="email" required>
 
         <label>Jeg henvender mig som</label>
-        <select name="henvendelse_type">
+        <select>
           <option>Hold / Spiller</option>
           <option>Sponsor</option>
           <option>Andet</option>
         </select>
 
         <label>Besked</label>
-        <textarea name="besked" rows="5" required></textarea>
-
-        <!-- Optional: redirect after success -->
-        <input type="hidden" name="_redirect" value="https://esportserien.dk/tak.html">
+        <textarea rows="5"></textarea>
 
         <button type="submit">Send henvendelse</button>
-
       </form>
     </div>
 
