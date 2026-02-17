@@ -88,10 +88,12 @@ nav a:hover {
   font-weight: 600;
   margin: 0 10px;
   transition: 0.3s;
+  color: #e6e6e6 !important;
 }
 
 .primary {
   background: #430E18;
+  color: #e6e6e6;   /* lys gra tekst */
 }
 
 .primary:hover {
@@ -220,6 +222,7 @@ footer {
   font-weight: 600;
   cursor: pointer;
   transition: 0.3s;
+  color: #e6e6e6 !important;
 }
 
 .contact-form button:hover {
