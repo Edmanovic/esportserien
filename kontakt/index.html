@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kontakt – EsportSerien</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <div class="container nav">
+    <a href="index.html" class="logo">ESPORTSERIEN</a>
+    <nav>
+      <a href="index.html">Forside</a>
+    </nav>
+  </div>
+</header>
+
+<section class="contact-section">
+  <div class="container contact-grid">
+
+    <div class="contact-info">
+      <h1>Kontakt Os</h1>
+      <p>
+        Er du et ambitiøst hold, en spiller eller en virksomhed,
+        der er interesseret i Esportserien?
+      </p>
+
+      <div class="info-block">
+        <h3>For Hold & Spillere</h3>
+        <p>Spørgsmål til den kommende sæson.</p>
+      </div>
+
+      <div class="info-block">
+        <h3>For Sponsorer</h3>
+        <p>Lad os tage en dialog om eksponering og samarbejde.</p>
+      </div>
+
+      <div class="direct-contact">
+        <p>Email:</p>
+        <strong>kontakt@esportserien.dk</strong>
+      </div>
+    </div>
+
+    <div class="contact-form">
+      <form action="https://formspree.io/f/xqedbrzk" method="POST">
+
+        <label>Navn / Organisation</label>
+        <input type="text" name="navn" required>
+
+        <label>Email</label>
+        <input type="email" name="email" required>
+
+        <label>Jeg henvender mig som</label>
+        <select name="henvendelse_type">
+          <option>Hold / Spiller</option>
+          <option>Sponsor</option>
+          <option>Andet</option>
+        </select>
+
+        <label>Besked</label>
+        <textarea name="besked" rows="5" required></textarea>
+
+        <!-- Optional: redirect after success -->
+        <input type="hidden" name="_redirect" value="https://esportserien.dk/tak.html">
+
+        <button type="submit">Send henvendelse</button>
+
+      </form>
+    </div>
+
+  </div>
+</section>
+
+<footer>
+  © 2026 EsportSerien – Danmark
+</footer>
+
+</body>
+</html>
