@@ -26,7 +26,7 @@
       <h1>Kontakt Os</h1>
       <p>
         Er du et ambitiøst hold, en spiller eller en virksomhed,
-		der er interesseret i Esportserien?
+        der er interesseret i Esportserien?
       </p>
 
       <div class="info-block">
@@ -46,24 +46,29 @@
     </div>
 
     <div class="contact-form">
-      <form>
+      <form action="https://formspree.io/f/xqedbrzk" method="POST">
+
         <label>Navn / Organisation</label>
-        <input type="text" required>
+        <input type="text" name="navn" required>
 
         <label>Email</label>
-        <input type="email" required>
+        <input type="email" name="email" required>
 
         <label>Jeg henvender mig som</label>
-        <select>
+        <select name="henvendelse_type">
           <option>Hold / Spiller</option>
           <option>Sponsor</option>
           <option>Andet</option>
         </select>
 
         <label>Besked</label>
-        <textarea rows="5"></textarea>
+        <textarea name="besked" rows="5" required></textarea>
+
+        <!-- Optional: redirect after success -->
+        <input type="hidden" name="_redirect" value="https://esportserien.dk/tak.html">
 
         <button type="submit">Send henvendelse</button>
+
       </form>
     </div>
 
