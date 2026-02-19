@@ -31,7 +31,7 @@ header {
 }
 
 .logo img {
-  height: 45px;   /* juster størrelse her */
+  height: 65px;   /* juster størrelse her */
   display: block;
 }
 
@@ -234,5 +234,6 @@ footer {
   }
 
 }
+
 
 
