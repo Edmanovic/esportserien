@@ -9,6 +9,8 @@ const state = {
   selectedId: null,
   search: '',
   showAddModal: false,
+  modalMode: 'add',   // 'add' | 'edit'
+  editingId: null,    // credential id being edited
   revealPassword: false,
 };
 
@@ -230,24 +232,31 @@ function renderDetailHTML(cred) {
         </div>` : ''}
       </div>
       <div class="detail__footer">
+        <button class="btn btn--ghost" id="edit-btn" data-id="${esc(cred.id)}">Edit</button>
         <button class="btn btn--danger" id="delete-btn" data-id="${esc(cred.id)}">Delete</button>
       </div>
     </div>`;
 }
 
 function renderAddModalHTML() {
+  const isEdit = state.modalMode === 'edit';
+  const editing = isEdit ? state.credentials.find(c => c.id === state.editingId) : null;
+  const prefillTitle = editing?.title ?? '';
+  const prefillUsername = editing?.username ?? '';
+  const prefillUrl = editing?.url ?? '';
+
   return `
     <div class="modal-overlay" id="modal-overlay">
-      <div class="modal" role="dialog" aria-modal="true" aria-label="Add credential">
-        <h3 class="modal__title">Add Credential</h3>
+      <div class="modal" role="dialog" aria-modal="true" aria-label="${isEdit ? 'Edit credential' : 'Add credential'}">
+        <h3 class="modal__title">${isEdit ? 'Edit Credential' : 'Add Credential'}</h3>
         <form id="add-form" autocomplete="off" novalidate>
           <div class="field">
             <label for="add-title">Title <span class="required">*</span></label>
-            <input id="add-title" type="text" placeholder="e.g. GitHub" required autofocus>
+            <input id="add-title" type="text" placeholder="e.g. GitHub" required autofocus value="${esc(prefillTitle)}">
           </div>
           <div class="field">
             <label for="add-username">Username</label>
-            <input id="add-username" type="text" placeholder="e.g. user@example.com" autocomplete="off">
+            <input id="add-username" type="text" placeholder="e.g. user@example.com" autocomplete="off" value="${esc(prefillUsername)}">
           </div>
           <div class="field">
             <label for="add-password">Password</label>
@@ -258,12 +267,12 @@ function renderAddModalHTML() {
           </div>
           <div class="field">
             <label for="add-url">URL <span class="muted">(optional)</span></label>
-            <input id="add-url" type="url" placeholder="https://example.com" autocomplete="off">
+            <input id="add-url" type="url" placeholder="https://example.com" autocomplete="off" value="${esc(prefillUrl)}">
           </div>
           <div id="add-error" class="error-msg" hidden></div>
           <div class="modal__actions">
             <button type="button" class="btn btn--ghost" id="add-cancel">Cancel</button>
-            <button type="submit" class="btn btn--primary" id="add-save">Save</button>
+            <button type="submit" class="btn btn--primary" id="add-save">${isEdit ? 'Save changes' : 'Save'}</button>
           </div>
         </form>
       </div>
@@ -302,6 +311,8 @@ function bindVaultEvents() {
 
   // Add button
   $('#add-btn')?.addEventListener('click', () => {
+    state.modalMode = 'add';
+    state.editingId = null;
     state.showAddModal = true;
     renderUnlocked();
     $('#add-title')?.focus();
@@ -377,6 +388,22 @@ function bindVaultEvents() {
     }
   });
 
+  // Detail panel: edit
+  $('#edit-btn')?.addEventListener('click', async (e) => {
+    const id = e.currentTarget.dataset.id;
+    try {
+      const cred = await invoke('get_credential', { id });
+      state.modalMode = 'edit';
+      state.editingId = id;
+      state.showAddModal = true;
+      renderUnlocked();
+      $('#add-password').value = cred.password ?? '';
+      $('#add-title')?.focus();
+    } catch (err) {
+      alert(`Could not load credential: ${err}`);
+    }
+  });
+
   // Detail panel: delete
   $('#delete-btn')?.addEventListener('click', async (e) => {
     const id = e.currentTarget.dataset.id;
@@ -435,15 +462,22 @@ function bindVaultEvents() {
       saveBtn.textContent = 'Saving…';
 
       try {
-        const id = await invoke('add_credential', { title, username, password, url });
-        state.credentials.push({ id, title, username, url });
-        state.selectedId = id;
+        if (state.modalMode === 'edit' && state.editingId) {
+          await invoke('update_credential', { id: state.editingId, title, username, password, url });
+          const idx = state.credentials.findIndex(c => c.id === state.editingId);
+          if (idx !== -1) state.credentials[idx] = { ...state.credentials[idx], title, username, url };
+          state.selectedId = state.editingId;
+        } else {
+          const id = await invoke('add_credential', { title, username, password, url });
+          state.credentials.push({ id, title, username, url });
+          state.selectedId = id;
+        }
         state.revealPassword = false;
         closeAddModal();
       } catch (err) {
         showError(errEl, `Error: ${err}`);
         saveBtn.disabled = false;
-        saveBtn.textContent = 'Save';
+        saveBtn.textContent = state.modalMode === 'edit' ? 'Save changes' : 'Save';
       }
     });
   }
@@ -456,6 +490,8 @@ function handleModalEscape(e) {
 function closeAddModal() {
   document.removeEventListener('keydown', handleModalEscape);
   state.showAddModal = false;
+  state.modalMode = 'add';
+  state.editingId = null;
   renderUnlocked();
 }
 
