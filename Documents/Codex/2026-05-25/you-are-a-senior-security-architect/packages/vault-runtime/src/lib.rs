@@ -11,6 +11,7 @@ pub mod hardening;
 pub mod integrity;
 pub mod ipc;
 pub mod persistence;
+pub mod secret_window;
 pub mod sync_client;
 pub mod unlock;
 
@@ -23,6 +24,7 @@ pub use persistence::{
     LocalVaultRecord, VaultIntegrityVerifier, VaultMigrationEngine, VaultPersistenceEngine,
     VaultStore,
 };
+pub use secret_window::SecretWindow;
 pub use unlock::{AutoLockEngine, RuntimeSecretStore, SessionRuntime, UnlockManager};
 
 /// Runtime errors that must fail closed at trust boundaries.
