@@ -187,3 +187,17 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+/* ── Password generator panel ───────────────────────────────── */
+.gen-panel {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 12px; margin-top: 6px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.gen-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.gen-length { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 160px; }
+.gen-length input[type="range"] { flex: 1; accent-color: var(--accent); }
+.gen-length-val { font-size: 13px; font-weight: 600; color: var(--accent); min-width: 24px; text-align: right; }
+.gen-checks { display: flex; gap: 10px; flex-wrap: wrap; }
+.gen-checks label { display: flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
+.gen-checks input[type="checkbox"] { accent-color: var(--accent); }

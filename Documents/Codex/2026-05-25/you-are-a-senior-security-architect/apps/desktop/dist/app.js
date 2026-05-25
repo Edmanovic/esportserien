@@ -270,6 +270,20 @@ function renderAddModalHTML() {
             <div class="input-row">
               <input id="add-password" type="password" placeholder="Password" autocomplete="new-password">
               <button type="button" class="btn btn--sm" id="add-pw-toggle">Show</button>
+              <button type="button" class="btn btn--sm" id="gen-toggle">Generate</button>
+            </div>
+            <div class="gen-panel" id="gen-panel" style="display:none">
+              <div class="gen-length">
+                <input type="range" id="gen-len" min="8" max="64" value="20">
+                <span class="gen-length-val" id="gen-len-val">20</span>
+              </div>
+              <div class="gen-checks">
+                <label><input type="checkbox" id="gen-upper" checked> A–Z</label>
+                <label><input type="checkbox" id="gen-lower" checked> a–z</label>
+                <label><input type="checkbox" id="gen-digits" checked> 0–9</label>
+                <label><input type="checkbox" id="gen-symbols" checked> !@#</label>
+              </div>
+              <button type="button" class="btn btn--primary btn--sm" id="gen-go">Generate password</button>
             </div>
           </div>
           <div class="field">
@@ -450,6 +464,66 @@ function bindVaultEvents() {
       } else {
         pwInput.type = 'password';
         btn.textContent = 'Show';
+      }
+    });
+
+    // Generator local state
+    const gen = { length: 20, upper: true, lower: true, digits: true, symbols: true };
+
+    // Generator toggle
+    $('#gen-toggle')?.addEventListener('click', () => {
+      const panel = $('#gen-panel');
+      if (!panel) return;
+      panel.style.display = panel.style.display === 'none' ? '' : 'none';
+    });
+
+    // Length slider
+    $('#gen-len')?.addEventListener('input', (e) => {
+      gen.length = parseInt(e.target.value, 10);
+      const val = $('#gen-len-val');
+      if (val) val.textContent = gen.length;
+    });
+
+    // Checkboxes — prevent unchecking the last one
+    ['gen-upper', 'gen-lower', 'gen-digits', 'gen-symbols'].forEach(id => {
+      $(`#${id}`)?.addEventListener('change', () => {
+        gen.upper   = !!$('#gen-upper')?.checked;
+        gen.lower   = !!$('#gen-lower')?.checked;
+        gen.digits  = !!$('#gen-digits')?.checked;
+        gen.symbols = !!$('#gen-symbols')?.checked;
+        const anyChecked = gen.upper || gen.lower || gen.digits || gen.symbols;
+        if (!anyChecked) {
+          const box = $(`#${id}`);
+          if (box) box.checked = true;
+          const key = id.replace('gen-', '');
+          gen[key] = true;
+        }
+      });
+    });
+
+    // Generate button
+    $('#gen-go')?.addEventListener('click', async () => {
+      const btn = $('#gen-go');
+      if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
+      try {
+        const pw = await invoke('generate_password', {
+          length: gen.length,
+          upper: gen.upper,
+          lower: gen.lower,
+          digits: gen.digits,
+          symbols: gen.symbols,
+        });
+        const pwInput = $('#add-password');
+        if (pwInput) {
+          pwInput.value = pw;
+          pwInput.type = 'text';
+          const toggle = $('#add-pw-toggle');
+          if (toggle) toggle.textContent = 'Hide';
+        }
+      } catch (err) {
+        alert(`Generator error: ${err}`);
+      } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Generate password'; }
       }
     });
 
