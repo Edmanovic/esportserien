@@ -55,6 +55,18 @@ impl RuntimeSecretStore {
     pub fn is_unlocked(&self) -> bool {
         self.vault_key.is_some()
     }
+
+    /// Returns true when the vault key's memory pages are locked.
+    #[must_use]
+    pub fn memory_lock_active(&self) -> bool {
+        self.vault_lock.is_some()
+    }
+
+    /// Returns the vault UUID when unlocked.
+    #[must_use]
+    pub fn vault_id(&self) -> Option<Uuid> {
+        self.vault_id
+    }
 }
 
 /// Active unlock/session runtime.
@@ -202,4 +214,32 @@ fn buffer_to_vault_key(buffer: &SecureBuffer) -> Result<VaultKey, RuntimeError> 
     let mut bytes = [0_u8; 32];
     bytes.copy_from_slice(buffer.expose_secret());
     Ok(VaultKey::from_bytes(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use espass_crypto_core::VaultKey;
+    use uuid::Uuid;
+
+    #[test]
+    fn memory_lock_active_false_when_locked() {
+        let store = RuntimeSecretStore::locked();
+        assert!(!store.memory_lock_active());
+    }
+
+    #[test]
+    fn vault_id_none_when_locked() {
+        let store = RuntimeSecretStore::locked();
+        assert!(store.vault_id().is_none());
+    }
+
+    #[test]
+    fn vault_id_some_after_open() {
+        let mut store = RuntimeSecretStore::locked();
+        let id = Uuid::new_v4();
+        let key = VaultKey::from_bytes([1u8; 32]);
+        store.open(id, key).unwrap();
+        assert_eq!(store.vault_id(), Some(id));
+    }
 }
