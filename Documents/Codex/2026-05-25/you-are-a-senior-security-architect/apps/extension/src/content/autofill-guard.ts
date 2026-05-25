@@ -1,3 +1,5 @@
+import { detectFullscreenOverlay } from './overlay-guard';
+
 export type AutofillSignal = {
   origin: string;
   topLevelOrigin: string;
@@ -48,6 +50,10 @@ document.addEventListener(
   (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) {
+      return;
+    }
+    if (detectFullscreenOverlay()) {
+      console.warn('[ESPASS] Potential overlay/clickjacking detected, blocking autofill');
       return;
     }
     const signal = collectAutofillSignal(target);
