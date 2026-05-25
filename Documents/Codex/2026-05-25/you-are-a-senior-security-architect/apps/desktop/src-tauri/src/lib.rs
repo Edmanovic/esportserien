@@ -19,6 +19,11 @@ pub fn run() {
             commands::add_credential,
             commands::get_credential,
             commands::delete_credential,
+            commands::update_credential,
+            commands::generate_password,
+            commands::import_credentials,
+            commands::export_credentials_csv,
+            commands::export_credentials_json,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
