@@ -3,6 +3,8 @@
 const invoke = (...args) =>
   window.__TAURI__?.core?.invoke(...args) ?? Promise.reject('Tauri not available');
 
+let _closeToolsHandler = null;
+
 // ─── State ───────────────────────────────────────────────────────────────────
 const state = {
   credentials: [],
@@ -349,10 +351,12 @@ function bindVaultEvents() {
     if (!menu) return;
     menu.style.display = menu.style.display === 'none' ? '' : 'none';
   });
-  document.addEventListener('click', function closeTools() {
+  if (_closeToolsHandler) document.removeEventListener('click', _closeToolsHandler);
+  _closeToolsHandler = function() {
     const menu = $('#tools-menu');
     if (menu) menu.style.display = 'none';
-  });
+  };
+  document.addEventListener('click', _closeToolsHandler);
 
   // Import CSV
   $('#import-csv-btn')?.addEventListener('click', () => {
