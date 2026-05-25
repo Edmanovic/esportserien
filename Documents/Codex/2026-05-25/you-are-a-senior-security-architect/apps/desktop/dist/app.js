@@ -47,6 +47,16 @@ async function copyText(text, btn) {
   }
 }
 
+function downloadBlob(filename, text, mime = 'text/plain') {
+  const blob = new Blob([text], { type: mime });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+}
+
 // ─── Screen: Loading ──────────────────────────────────────────────────────────
 function renderLoading() {
   app.innerHTML = `
@@ -165,6 +175,15 @@ function renderUnlocked() {
           <input id="search-input" type="search" placeholder="Search credentials…" value="${esc(state.search)}">
         </div>
         <div class="topbar__actions">
+          <div class="tools-wrap">
+            <button class="btn btn--ghost" id="tools-btn">Tools ▾</button>
+            <div class="tools-menu" id="tools-menu" style="display:none">
+              <button id="import-csv-btn">Import CSV</button>
+              <hr>
+              <button id="export-csv-btn">Export CSV</button>
+              <button id="export-json-btn">Export JSON</button>
+            </div>
+          </div>
           <button class="btn btn--ghost" id="lock-btn">Lock</button>
           <button class="btn btn--primary" id="add-btn">+ Add</button>
         </div>
@@ -198,6 +217,8 @@ function renderUnlocked() {
 
       <!-- Add modal -->
       ${state.showAddModal ? renderAddModalHTML() : ''}
+      <!-- Hidden import file input -->
+      <input type="file" id="import-file-input" accept=".csv" style="display:none">
     </div>`;
 
   bindVaultEvents();
@@ -320,6 +341,66 @@ function bindVaultEvents() {
       renderUnlocked();
     });
   }
+
+  // Tools dropdown toggle
+  $('#tools-btn')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const menu = $('#tools-menu');
+    if (!menu) return;
+    menu.style.display = menu.style.display === 'none' ? '' : 'none';
+  });
+  document.addEventListener('click', function closeTools() {
+    const menu = $('#tools-menu');
+    if (menu) menu.style.display = 'none';
+  });
+
+  // Import CSV
+  $('#import-csv-btn')?.addEventListener('click', () => {
+    const menu = $('#tools-menu');
+    if (menu) menu.style.display = 'none';
+    $('#import-file-input')?.click();
+  });
+
+  $('#import-file-input')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    e.target.value = '';
+    try {
+      const summary = await invoke('import_credentials', { csvText: text });
+      state.credentials = await invoke('list_credentials');
+      renderUnlocked();
+      showToast(`Imported ${summary.imported}, skipped ${summary.skipped} duplicates${summary.errors ? `, ${summary.errors} errors` : ''}`);
+    } catch (err) {
+      showToast(`Import failed: ${err}`, 'error');
+    }
+  });
+
+  // Export CSV
+  $('#export-csv-btn')?.addEventListener('click', async () => {
+    const menu = $('#tools-menu');
+    if (menu) menu.style.display = 'none';
+    if (!confirm('This file will contain your passwords in plaintext.\n\nStore it in a secure location.')) return;
+    try {
+      const csv = await invoke('export_credentials_csv');
+      downloadBlob('espass-export.csv', csv, 'text/csv');
+    } catch (err) {
+      showToast(`Export failed: ${err}`, 'error');
+    }
+  });
+
+  // Export JSON
+  $('#export-json-btn')?.addEventListener('click', async () => {
+    const menu = $('#tools-menu');
+    if (menu) menu.style.display = 'none';
+    if (!confirm('This file will contain your passwords in plaintext.\n\nStore it in a secure location.')) return;
+    try {
+      const json = await invoke('export_credentials_json');
+      downloadBlob('espass-export.json', json, 'application/json');
+    } catch (err) {
+      showToast(`Export failed: ${err}`, 'error');
+    }
+  });
 
   // Lock
   $('#lock-btn')?.addEventListener('click', async () => {
@@ -593,6 +674,19 @@ async function bootUnlocked() {
 function showError(el, msg) {
   el.textContent = msg;
   el.hidden = false;
+}
+
+function showToast(msg, type = 'success', durationMs = 3000) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  const el = document.createElement('div');
+  el.className = `toast toast--${type}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => {
+    el.style.animation = 'toast-out .3s ease forwards';
+    setTimeout(() => el.remove(), 300);
+  }, durationMs);
 }
 
 async function boot() {
