@@ -338,9 +338,17 @@ function bindVaultEvents() {
   const searchInput = $('#search-input');
   if (searchInput) {
     searchInput.addEventListener('input', (e) => {
+      const pos = e.target.selectionStart;
       state.search = e.target.value;
       state.selectedId = null;
       renderUnlocked();
+      // renderUnlocked() destroys and recreates the DOM, so we must
+      // re-focus the new search input and restore the cursor position.
+      const newInput = $('#search-input');
+      if (newInput) {
+        newInput.focus();
+        newInput.setSelectionRange(pos, pos);
+      }
     });
   }
 
