@@ -4,7 +4,8 @@
   "description": "Minimal ESPASS desktop permissions. Vault and IPC commands are added explicitly after security review.",
   "windows": ["main"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "dialog:allow-save"
   ]
 }
 

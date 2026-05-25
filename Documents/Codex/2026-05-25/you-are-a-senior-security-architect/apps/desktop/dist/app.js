@@ -386,8 +386,8 @@ function bindVaultEvents() {
     if (menu) menu.style.display = 'none';
     if (!confirm('This file will contain your passwords in plaintext.\n\nStore it in a secure location.')) return;
     try {
-      const csv = await invoke('export_credentials_csv');
-      downloadBlob('espass-export.csv', csv, 'text/csv');
+      const saved = await invoke('export_credentials_csv');
+      if (saved) showToast('CSV exported successfully');
     } catch (err) {
       showToast(`Export failed: ${err}`, 'error');
     }
@@ -399,8 +399,8 @@ function bindVaultEvents() {
     if (menu) menu.style.display = 'none';
     if (!confirm('This file will contain your passwords in plaintext.\n\nStore it in a secure location.')) return;
     try {
-      const json = await invoke('export_credentials_json');
-      downloadBlob('espass-export.json', json, 'application/json');
+      const saved = await invoke('export_credentials_json');
+      if (saved) showToast('JSON exported successfully');
     } catch (err) {
       showToast(`Export failed: ${err}`, 'error');
     }

@@ -550,9 +550,15 @@ pub fn import_credentials(
     Ok(summary)
 }
 
-/// Exports all credentials as a Chrome-compatible CSV string (plaintext).
+/// Opens a native Save dialog and writes credentials as Chrome-compatible CSV.
+/// Returns `true` if the file was saved, `false` if the user cancelled.
 #[tauri::command]
-pub fn export_credentials_csv(state: State<AppState>) -> Result<String, String> {
+pub async fn export_credentials_csv(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+
     let (key_bytes,) = {
         let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
         let key = secrets.vault_key().map_err(|_| "Vault is locked".to_string())?;
@@ -575,13 +581,32 @@ pub fn export_credentials_csv(state: State<AppState>) -> Result<String, String> 
         ])
         .map_err(|e| e.to_string())?;
     }
-    let data = wtr.into_inner().map_err(|e| e.to_string())?;
-    String::from_utf8(data).map_err(|e| e.to_string())
+    let csv_bytes = wtr.into_inner().map_err(|e| e.to_string())?;
+
+    let Some(dest) = app
+        .dialog()
+        .file()
+        .set_file_name("espass-export.csv")
+        .add_filter("CSV", &["csv"])
+        .blocking_save_file()
+    else {
+        return Ok(false);
+    };
+
+    let path = dest.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, &csv_bytes).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
-/// Exports all credentials as a pretty-printed JSON string (plaintext backup).
+/// Opens a native Save dialog and writes credentials as pretty-printed JSON.
+/// Returns `true` if the file was saved, `false` if the user cancelled.
 #[tauri::command]
-pub fn export_credentials_json(state: State<AppState>) -> Result<String, String> {
+pub async fn export_credentials_json(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
+
     let (key_bytes,) = {
         let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
         let key = secrets.vault_key().map_err(|_| "Vault is locked".to_string())?;
@@ -591,7 +616,21 @@ pub fn export_credentials_json(state: State<AppState>) -> Result<String, String>
     };
     let vault_key = espass_crypto_core::VaultKey::from_bytes(key_bytes);
     let contents = load_contents(&vault_key, &state)?;
-    serde_json::to_string_pretty(&contents).map_err(|e| e.to_string())
+    let json = serde_json::to_string_pretty(&contents).map_err(|e| e.to_string())?;
+
+    let Some(dest) = app
+        .dialog()
+        .file()
+        .set_file_name("espass-export.json")
+        .add_filter("JSON", &["json"])
+        .blocking_save_file()
+    else {
+        return Ok(false);
+    };
+
+    let path = dest.into_path().map_err(|e| e.to_string())?;
+    std::fs::write(&path, json.as_bytes()).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 #[cfg(test)]
