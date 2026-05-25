@@ -550,6 +550,56 @@ pub fn import_credentials(
     Ok(summary)
 }
 
+/// Parses an ESPASS JSON export and merges credentials into the unlocked vault.
+/// Fresh UUIDs and timestamps are assigned to avoid ID collisions.
+/// Duplicates (same title + username, case-insensitive) are skipped.
+#[tauri::command]
+pub fn import_credentials_json(
+    json_text: String,
+    state: State<AppState>,
+) -> Result<ImportSummary, String> {
+    let (key_bytes, vault_id) = {
+        let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
+        let key = secrets.vault_key().map_err(|_| "Vault is locked".to_string())?;
+        let mut kb = [0u8; 32];
+        kb.copy_from_slice(key.expose_secret());
+        let vid = secrets.vault_id().ok_or("Vault is locked")?;
+        (kb, vid)
+    };
+    let vault_key = espass_crypto_core::VaultKey::from_bytes(key_bytes);
+
+    let incoming: VaultContents = serde_json::from_str(&json_text)
+        .map_err(|e| format!("Invalid JSON: {e}"))?;
+
+    let mut contents = load_contents(&vault_key, &state)?;
+    let mut summary = ImportSummary { imported: 0, skipped: 0, errors: 0 };
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+
+    for mut cred in incoming.credentials {
+        let is_dup = contents.credentials.iter().any(|c| {
+            c.title.eq_ignore_ascii_case(&cred.title)
+                && c.username.eq_ignore_ascii_case(&cred.username)
+        });
+        if is_dup {
+            summary.skipped += 1;
+            continue;
+        }
+        // Fresh ID + timestamps so imported entries never collide with existing ones.
+        cred.id = Uuid::new_v4().to_string();
+        cred.created_at = now;
+        cred.updated_at = now;
+        contents.credentials.push(cred);
+        summary.imported += 1;
+    }
+
+    if summary.imported > 0 {
+        let mut meta = load_meta(&state)?;
+        save_contents(&vault_key, vault_id, &contents, &mut meta, &state)?;
+    }
+
+    Ok(summary)
+}
+
 /// Opens a native Save dialog and writes credentials as Chrome-compatible CSV.
 /// Returns `true` if the file was saved, `false` if the user cancelled.
 #[tauri::command]

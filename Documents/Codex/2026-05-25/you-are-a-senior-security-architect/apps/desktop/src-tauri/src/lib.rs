@@ -23,6 +23,7 @@ pub fn run() {
             commands::update_credential,
             commands::generate_password,
             commands::import_credentials,
+            commands::import_credentials_json,
             commands::export_credentials_csv,
             commands::export_credentials_json,
         ])

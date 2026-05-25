@@ -181,6 +181,7 @@ function renderUnlocked() {
             <button class="btn btn--ghost" id="tools-btn">Tools ▾</button>
             <div class="tools-menu" id="tools-menu" style="display:none">
               <button id="import-csv-btn">Import CSV</button>
+              <button id="import-json-btn">Import JSON</button>
               <hr>
               <button id="export-csv-btn">Export CSV</button>
               <button id="export-json-btn">Export JSON</button>
@@ -219,8 +220,9 @@ function renderUnlocked() {
 
       <!-- Add modal -->
       ${state.showAddModal ? renderAddModalHTML() : ''}
-      <!-- Hidden import file input -->
+      <!-- Hidden import file inputs -->
       <input type="file" id="import-file-input" accept=".csv" style="display:none">
+      <input type="file" id="import-json-input" accept=".json" style="display:none">
     </div>`;
 
   bindVaultEvents();
@@ -383,6 +385,28 @@ function bindVaultEvents() {
       state.credentials = await invoke('list_credentials');
       renderUnlocked();
       showToast(`Imported ${summary.imported}, skipped ${summary.skipped} duplicates${summary.errors ? `, ${summary.errors} errors` : ''}`);
+    } catch (err) {
+      showToast(`Import failed: ${err}`, 'error');
+    }
+  });
+
+  // Import JSON
+  $('#import-json-btn')?.addEventListener('click', () => {
+    const menu = $('#tools-menu');
+    if (menu) menu.style.display = 'none';
+    $('#import-json-input')?.click();
+  });
+
+  $('#import-json-input')?.addEventListener('change', async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    e.target.value = '';
+    try {
+      const summary = await invoke('import_credentials_json', { jsonText: text });
+      state.credentials = await invoke('list_credentials');
+      renderUnlocked();
+      showToast(`Imported ${summary.imported}, skipped ${summary.skipped} duplicates`);
     } catch (err) {
       showToast(`Import failed: ${err}`, 'error');
     }
