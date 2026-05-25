@@ -56,7 +56,11 @@ impl RuntimeSecretStore {
         self.vault_key.is_some()
     }
 
-    /// Returns true when the vault key's memory pages are locked.
+    /// Returns true when the vault key's memory pages are pinned by the OS.
+    ///
+    /// This may return `false` even after a successful `open()` if `mlock`/`VirtualLock`
+    /// failed due to process limits or sandbox restrictions. Use [`RuntimeSecretStore::is_unlocked`]
+    /// to check whether the vault key is available, regardless of lock state.
     #[must_use]
     pub fn memory_lock_active(&self) -> bool {
         self.vault_lock.is_some()
@@ -241,5 +245,18 @@ mod tests {
         let key = VaultKey::from_bytes([1u8; 32]);
         store.open(id, key).unwrap();
         assert_eq!(store.vault_id(), Some(id));
+    }
+
+    #[test]
+    fn locking_clears_memory_lock_and_vault_id() {
+        let mut store = RuntimeSecretStore::locked();
+        let id = Uuid::new_v4();
+        let key = VaultKey::from_bytes([2u8; 32]);
+        store.open(id, key).unwrap();
+        assert!(store.is_unlocked());
+        store.lock();
+        assert!(!store.memory_lock_active());
+        assert!(store.vault_id().is_none());
+        assert!(!store.is_unlocked());
     }
 }
