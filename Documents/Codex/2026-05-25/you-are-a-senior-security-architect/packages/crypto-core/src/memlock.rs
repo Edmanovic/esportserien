@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use crate::CryptoError;
 
 /// Guard representing a best-effort operating system memory lock.
@@ -27,6 +29,12 @@ impl Drop for MemoryLockGuard {
         }
     }
 }
+
+// SAFETY: MemoryLockGuard only calls mlock/VirtualLock/munlock/VirtualUnlock,
+// which are thread-safe OS APIs. The pointer is to heap memory owned by the
+// enclosing key type and is never dereferenced by the guard — it is only passed
+// to the OS. Callers must protect concurrent access with a Mutex.
+unsafe impl Send for MemoryLockGuard {}
 
 /// Memory that can request an operating system lock.
 pub trait MemoryLock {
@@ -83,3 +91,16 @@ fn lock_memory(_ptr: *mut u8, _len: usize) -> Result<(), CryptoError> {
 
 #[cfg(not(any(unix, windows)))]
 fn unlock_memory(_ptr: *mut u8, _len: usize) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Compile-time check: MemoryLockGuard must be Send so it can live
+    // inside Mutex<> across threads in Tauri state.
+    #[test]
+    fn memory_lock_guard_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<MemoryLockGuard>();
+    }
+}
