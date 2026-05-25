@@ -24,3 +24,21 @@ name = "ipc_schema"
 path = "fuzz_targets/ipc_schema.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "version_downgrade"
+path = "fuzz_targets/version_downgrade.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "corrupted_aad"
+path = "fuzz_targets/corrupted_aad.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "nonce_reuse"
+path = "fuzz_targets/nonce_reuse.rs"
+test = false
+doc = false
