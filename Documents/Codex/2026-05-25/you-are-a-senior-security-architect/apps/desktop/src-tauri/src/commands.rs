@@ -328,3 +328,114 @@ pub fn delete_credential(id: String, state: State<AppState>) -> Result<(), Strin
     save_contents(&vault_key, vault_id, &contents, &mut meta, &state)?;
     Ok(())
 }
+
+/// Updates an existing credential's fields.
+#[tauri::command]
+pub fn update_credential(
+    id: String,
+    title: String,
+    username: String,
+    password: String,
+    url: Option<String>,
+    state: State<AppState>,
+) -> Result<(), String> {
+    let (key_bytes, vault_id) = {
+        let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
+        let key = secrets.vault_key().map_err(|_| "Vault is locked".to_string())?;
+        let mut kb = [0u8; 32];
+        kb.copy_from_slice(key.expose_secret());
+        let vid = secrets.vault_id().ok_or("Vault is locked")?;
+        (kb, vid)
+    };
+    let vault_key = espass_crypto_core::VaultKey::from_bytes(key_bytes);
+
+    let mut contents = load_contents(&vault_key, &state)?;
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let cred = contents
+        .credentials
+        .iter_mut()
+        .find(|c| c.id == id)
+        .ok_or_else(|| "Credential not found".to_string())?;
+    cred.title = title;
+    cred.username = username;
+    cred.password = password;
+    cred.url = url;
+    cred.updated_at = now;
+
+    let mut meta = load_meta(&state)?;
+    save_contents(&vault_key, vault_id, &contents, &mut meta, &state)?;
+    Ok(())
+}
+
+/// Generates a cryptographically secure password from the selected character sets.
+/// Uses rejection sampling on OS-CSPRNG bytes to eliminate modulo bias.
+/// `length` is clamped to [8, 64].
+#[tauri::command]
+pub fn generate_password(
+    length: u8,
+    upper: bool,
+    lower: bool,
+    digits: bool,
+    symbols: bool,
+) -> Result<String, String> {
+    use espass_crypto_core::random_vec;
+
+    let mut charset = String::new();
+    if upper   { charset.push_str("ABCDEFGHIJKLMNOPQRSTUVWXYZ"); }
+    if lower   { charset.push_str("abcdefghijklmnopqrstuvwxyz"); }
+    if digits  { charset.push_str("0123456789"); }
+    if symbols { charset.push_str("!@#$%^&*()-_=+[]{}|;:,.<>?"); }
+
+    if charset.is_empty() {
+        return Err("no character set selected".to_string());
+    }
+
+    let length = length.clamp(8, 64) as usize;
+    let chars: Vec<char> = charset.chars().collect();
+    let n = chars.len();
+    let threshold = 256 - (256 % n);
+
+    let mut result = String::with_capacity(length);
+    while result.len() < length {
+        let batch = random_vec(length * 2).map_err(|_| "random generation failed".to_string())?;
+        for byte in batch {
+            if result.len() >= length { break; }
+            if (byte as usize) < threshold {
+                result.push(chars[byte as usize % n]);
+            }
+        }
+    }
+    Ok(result)
+}
+
+#[cfg(test)]
+mod commands_tests {
+    use super::*;
+
+    #[test]
+    fn generate_password_correct_length() {
+        let pw = generate_password(20, true, true, true, true).unwrap();
+        assert_eq!(pw.len(), 20);
+    }
+
+    #[test]
+    fn generate_password_only_upper() {
+        let pw = generate_password(16, true, false, false, false).unwrap();
+        assert!(pw.chars().all(|c| c.is_ascii_uppercase()), "unexpected char in: {pw}");
+    }
+
+    #[test]
+    fn generate_password_clamps_length() {
+        let pw = generate_password(4, true, true, false, false).unwrap();
+        assert_eq!(pw.len(), 8, "length below 8 should be clamped to 8");
+
+        let pw2 = generate_password(200, true, true, false, false).unwrap();
+        assert_eq!(pw2.len(), 64, "length above 64 should be clamped to 64");
+    }
+
+    #[test]
+    fn generate_password_empty_charset_errors() {
+        let err = generate_password(16, false, false, false, false).unwrap_err();
+        assert_eq!(err, "no character set selected");
+    }
+}
