@@ -3,6 +3,7 @@ resolver = "2"
 members = [
   "apps/backend",
   "apps/desktop/native-messaging-host",
+  "apps/desktop/src-tauri",
   "packages/crypto-core",
   "packages/security-events",
   "packages/shared-types",
