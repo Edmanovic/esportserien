@@ -27,15 +27,25 @@ pub fn unlock_vault(
     vault_id: uuid::Uuid,
     state: State<AppState>,
 ) -> Result<(), String> {
+    #[cfg(not(debug_assertions))]
+    compile_error!("unlock_vault uses a placeholder KDF — Argon2id must be wired before release");
+
     use espass_crypto_core::VaultKey;
+    use zeroize::Zeroize;
 
     let mut secrets = state.secrets.lock().map_err(|e| e.to_string())?;
-    // Prototype: derive key from password bytes (not secure — audit will flag for Argon2id).
+    // PROTOTYPE: derive key from password bytes truncated/padded to 32 bytes.
+    // SECURITY NOTE: This is NOT a secure KDF. Replace with Argon2id before release.
+    // The compile_error! above prevents this from shipping in a release build.
     let mut key_bytes = [0u8; 32];
     let password_bytes = password.as_bytes();
     let len = password_bytes.len().min(32);
     key_bytes[..len].copy_from_slice(&password_bytes[..len]);
     let key = VaultKey::from_bytes(key_bytes);
+    key_bytes.zeroize();
+    // Note: password String heap allocation is dropped here; for production use
+    // secrecy::SecretString + explicit zeroize.
+    drop(password);
     secrets.open(vault_id, key).map_err(|e| e.to_string())
 }
 
