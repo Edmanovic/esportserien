@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 axum = "0.7.5"
 espass-shared-types = { version = "0.1.0", path = "../../packages/shared-types" }
+rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1.0.203", features = ["derive"] }
 thiserror = "1.0.61"
 time = { version = "0.3.36", features = ["serde", "formatting"] }
