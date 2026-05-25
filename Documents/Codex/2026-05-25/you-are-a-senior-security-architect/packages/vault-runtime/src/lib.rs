@@ -8,6 +8,7 @@
 pub mod autofill;
 pub mod device_trust;
 pub mod hardening;
+pub mod integrity;
 pub mod ipc;
 pub mod persistence;
 pub mod sync_client;
@@ -16,6 +17,7 @@ pub mod unlock;
 pub use autofill::{CredentialRequestBroker, CredentialScope, SecureAutofillRuntime};
 pub use device_trust::{DeviceRevocationManager, DeviceTrustRuntime, TrustedDeviceRegistry};
 pub use hardening::{catch_vault_panic, sanitize_error, SanitizedError};
+pub use integrity::check_runtime_invariants;
 pub use ipc::{ExtensionTrustValidator, IpcHandshakeManager, IpcSessionRegistry, SignedIpcRequest};
 pub use persistence::{
     LocalVaultRecord, VaultIntegrityVerifier, VaultMigrationEngine, VaultPersistenceEngine,
