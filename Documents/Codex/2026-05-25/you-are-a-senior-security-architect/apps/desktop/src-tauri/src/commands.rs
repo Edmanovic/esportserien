@@ -442,3 +442,194 @@ mod commands_tests {
         assert_eq!(err, "no character set selected");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Import / Export
+// ---------------------------------------------------------------------------
+
+/// Summary returned after a CSV import.
+#[derive(Debug, serde::Serialize)]
+pub struct ImportSummary {
+    pub imported: u32,
+    pub skipped: u32,
+    pub errors: u32,
+}
+
+/// Returns (name_col, url_col, user_col, pass_col) indices for a CSV header row.
+/// `url_col` is `None` when no URL column exists.
+fn detect_csv_columns(
+    headers: &csv::StringRecord,
+) -> Result<(usize, Option<usize>, usize, usize), String> {
+    let find = |candidates: &[&str]| -> Option<usize> {
+        candidates.iter().find_map(|c| {
+            headers.iter().position(|h| h.eq_ignore_ascii_case(c))
+        })
+    };
+
+    let name = find(&["name", "title"]).ok_or("Cannot detect name column")?;
+    let url  = find(&["url", "login_uri", "formActionOrigin"]);
+    let user = find(&["username", "login_username"]).ok_or("Cannot detect username column")?;
+    let pass = find(&["password", "login_password"]).ok_or("Cannot detect password column")?;
+
+    Ok((name, url, user, pass))
+}
+
+/// Parses a CSV string (Chrome / Firefox / Bitwarden format) and adds
+/// credentials to the unlocked vault. Returns an import summary.
+#[tauri::command]
+pub fn import_credentials(
+    csv_text: String,
+    state: State<AppState>,
+) -> Result<ImportSummary, String> {
+    let (key_bytes, vault_id) = {
+        let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
+        let key = secrets.vault_key().map_err(|_| "Vault is locked".to_string())?;
+        let mut kb = [0u8; 32];
+        kb.copy_from_slice(key.expose_secret());
+        let vid = secrets.vault_id().ok_or("Vault is locked")?;
+        (kb, vid)
+    };
+    let vault_key = espass_crypto_core::VaultKey::from_bytes(key_bytes);
+
+    let mut contents = load_contents(&vault_key, &state)?;
+    let mut summary = ImportSummary { imported: 0, skipped: 0, errors: 0 };
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+
+    let mut rdr = csv::ReaderBuilder::new()
+        .flexible(true)
+        .from_reader(csv_text.as_bytes());
+
+    let headers = rdr.headers().map_err(|e| e.to_string())?.clone();
+    let (col_name, col_url, col_user, col_pass) = detect_csv_columns(&headers)?;
+
+    for result in rdr.records() {
+        let record = match result {
+            Ok(r) => r,
+            Err(_) => { summary.errors += 1; continue; }
+        };
+
+        let title    = record.get(col_name).unwrap_or("").trim().to_string();
+        let username = record.get(col_user).unwrap_or("").trim().to_string();
+        let password = record.get(col_pass).unwrap_or("").trim().to_string();
+        let url = col_url
+            .and_then(|i| record.get(i))
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        if username.is_empty() && password.is_empty() {
+            summary.skipped += 1;
+            continue;
+        }
+
+        // Skip duplicates (same title + username, case-insensitive).
+        let is_dup = contents.credentials.iter().any(|c| {
+            c.title.eq_ignore_ascii_case(&title) && c.username.eq_ignore_ascii_case(&username)
+        });
+        if is_dup {
+            summary.skipped += 1;
+            continue;
+        }
+
+        contents.credentials.push(Credential {
+            id: Uuid::new_v4().to_string(),
+            title: if title.is_empty() { username.clone() } else { title },
+            username,
+            password,
+            url,
+            created_at: now,
+            updated_at: now,
+        });
+        summary.imported += 1;
+    }
+
+    if summary.imported > 0 {
+        let mut meta = load_meta(&state)?;
+        save_contents(&vault_key, vault_id, &contents, &mut meta, &state)?;
+    }
+
+    Ok(summary)
+}
+
+/// Exports all credentials as a Chrome-compatible CSV string (plaintext).
+#[tauri::command]
+pub fn export_credentials_csv(state: State<AppState>) -> Result<String, String> {
+    let (key_bytes,) = {
+        let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
+        let key = secrets.vault_key().map_err(|_| "Vault is locked".to_string())?;
+        let mut kb = [0u8; 32];
+        kb.copy_from_slice(key.expose_secret());
+        (kb,)
+    };
+    let vault_key = espass_crypto_core::VaultKey::from_bytes(key_bytes);
+    let contents = load_contents(&vault_key, &state)?;
+
+    let mut wtr = csv::Writer::from_writer(vec![]);
+    wtr.write_record(["name", "url", "username", "password"])
+        .map_err(|e| e.to_string())?;
+    for c in &contents.credentials {
+        wtr.write_record([
+            c.title.as_str(),
+            c.url.as_deref().unwrap_or(""),
+            c.username.as_str(),
+            c.password.as_str(),
+        ])
+        .map_err(|e| e.to_string())?;
+    }
+    let data = wtr.into_inner().map_err(|e| e.to_string())?;
+    String::from_utf8(data).map_err(|e| e.to_string())
+}
+
+/// Exports all credentials as a pretty-printed JSON string (plaintext backup).
+#[tauri::command]
+pub fn export_credentials_json(state: State<AppState>) -> Result<String, String> {
+    let (key_bytes,) = {
+        let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
+        let key = secrets.vault_key().map_err(|_| "Vault is locked".to_string())?;
+        let mut kb = [0u8; 32];
+        kb.copy_from_slice(key.expose_secret());
+        (kb,)
+    };
+    let vault_key = espass_crypto_core::VaultKey::from_bytes(key_bytes);
+    let contents = load_contents(&vault_key, &state)?;
+    serde_json::to_string_pretty(&contents).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+
+    fn make_headers(cols: &[&str]) -> csv::StringRecord {
+        csv::StringRecord::from(cols.to_vec())
+    }
+
+    #[test]
+    fn detect_chrome_format() {
+        let h = make_headers(&["name", "url", "username", "password"]);
+        let (name, url, user, pass) = detect_csv_columns(&h).unwrap();
+        assert_eq!((name, url, user, pass), (0, Some(1), 2, 3));
+    }
+
+    #[test]
+    fn detect_bitwarden_format() {
+        let h = make_headers(&["folder","favorite","type","name","notes","fields",
+                               "reprompt","login_uri","login_username","login_password","login_totp"]);
+        let (name, url, user, pass) = detect_csv_columns(&h).unwrap();
+        assert_eq!(name, 3);
+        assert_eq!(url, Some(7));
+        assert_eq!(user, 8);
+        assert_eq!(pass, 9);
+    }
+
+    #[test]
+    fn detect_missing_password_errors() {
+        let h = make_headers(&["name", "url", "username"]);
+        assert!(detect_csv_columns(&h).is_err());
+    }
+
+    #[test]
+    fn detect_no_url_column() {
+        let h = make_headers(&["name", "username", "password"]);
+        let (_, url, _, _) = detect_csv_columns(&h).unwrap();
+        assert_eq!(url, None);
+    }
+}
