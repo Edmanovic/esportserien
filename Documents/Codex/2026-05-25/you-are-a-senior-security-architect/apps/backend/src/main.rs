@@ -5,6 +5,7 @@
 //! credentials, plaintext TOTP seeds, or vault keys.
 
 mod security;
+mod rate_limit;
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
