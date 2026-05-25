@@ -6,6 +6,7 @@
 //! material only in short-lived in-memory structures.
 
 pub mod autofill;
+pub mod clipboard;
 pub mod device_trust;
 pub mod hardening;
 pub mod integrity;
@@ -16,6 +17,7 @@ pub mod sync_client;
 pub mod unlock;
 
 pub use autofill::{CredentialRequestBroker, CredentialScope, SecureAutofillRuntime};
+pub use clipboard::ClipboardGuard;
 pub use device_trust::{DeviceRevocationManager, DeviceTrustRuntime, TrustedDeviceRegistry};
 pub use hardening::{catch_vault_panic, sanitize_error, SanitizedError};
 pub use integrity::check_runtime_invariants;
