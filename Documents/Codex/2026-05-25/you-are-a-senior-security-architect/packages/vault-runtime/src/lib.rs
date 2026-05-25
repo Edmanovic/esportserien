@@ -51,6 +51,12 @@ pub enum RuntimeError {
     /// Autofill request is not allowed.
     #[error("autofill request denied")]
     AutofillDenied,
+    /// A panic was caught at a trust boundary.
+    #[error("internal panic caught at trust boundary")]
+    InternalPanic,
+    /// A runtime invariant was violated.
+    #[error("runtime integrity invariant violated")]
+    IntegrityViolation,
 }
 
 impl From<espass_crypto_core::CryptoError> for RuntimeError {
