@@ -1,0 +1,26 @@
+[package]
+name = "espass-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+espass-crypto-core = { version = "0.1.0", path = "../packages/crypto-core" }
+espass-shared-types = { version = "0.1.0", path = "../packages/shared-types" }
+libfuzzer-sys = "0.4"
+serde_json = "1.0.117"
+
+[[bin]]
+name = "malformed_envelope"
+path = "fuzz_targets/malformed_envelope.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "ipc_schema"
+path = "fuzz_targets/ipc_schema.rs"
+test = false
+doc = false

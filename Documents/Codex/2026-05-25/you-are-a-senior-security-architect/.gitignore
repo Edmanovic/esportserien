@@ -1,0 +1,25 @@
+# Build outputs
+/target/
+/dist/
+/build/
+/.turbo/
+/.next/
+/node_modules/
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+secrets.*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+

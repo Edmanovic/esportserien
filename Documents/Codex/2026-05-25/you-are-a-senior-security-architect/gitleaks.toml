@@ -1,0 +1,11 @@
+title = "ESPASS gitleaks policy"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "espass-master-password-marker"
+description = "Detect accidental committed master password examples"
+regex = '''(?i)(master[_ -]?password|vault[_ -]?key|totp[_ -]?seed)\s*[:=]\s*['"][^'"]{8,}['"]'''
+tags = ["secret", "espass"]
+

@@ -1,0 +1,9 @@
+{
+  "name": "session-expiry-race",
+  "description": "Attempt an autofill request while the desktop session is expiring or locking.",
+  "expected_result": "runtime fails closed and wipes unlocked vault key before serving request",
+  "severity": "high",
+  "exploitability": 5,
+  "mitigation": "central auto-lock enforcement and runtime secret store lock operation"
+}
+

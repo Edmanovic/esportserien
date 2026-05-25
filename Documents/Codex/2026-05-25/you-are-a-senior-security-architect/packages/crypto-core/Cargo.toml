@@ -1,0 +1,33 @@
+[package]
+name = "espass-crypto-core"
+version = "0.1.0"
+description = "Cryptographic primitives for the ESPASS zero-knowledge password manager."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+aes-gcm = { version = "0.10.3", features = ["aes"] }
+argon2 = { version = "0.5.3", default-features = false, features = ["alloc", "password-hash"] }
+libc = "0.2.155"
+rand_core = { version = "0.6.4", features = ["getrandom"] }
+serde = { version = "1.0.203", features = ["derive"] }
+subtle = "2.6.1"
+thiserror = "1.0.61"
+windows-sys = { version = "0.52.0", features = ["Win32_Foundation", "Win32_System_Memory"] }
+zeroize = { version = "1.8.1", features = ["derive"] }
+
+[dev-dependencies]
+proptest = "1.6.0"
+serde_json = "1.0.117"
+
+[lints.rust]
+unsafe_code = "allow"
+missing_docs = "warn"
+
+[lints.clippy]
+panic = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+todo = "warn"

@@ -1,0 +1,49 @@
+[agents.security]
+path = "agents/security-agent"
+severity_gate = "high"
+checks = [
+  "secret-scan",
+  "dependency-audit",
+  "crypto-patterns",
+  "owasp-asvs"
+]
+
+[agents.red_team]
+path = "agents/red-team-agent"
+severity_gate = "high"
+checks = [
+  "auth-abuse",
+  "api-fuzz",
+  "autofill-phishing",
+  "session-replay"
+]
+
+[agents.architecture]
+path = "agents/architecture-agent"
+severity_gate = "medium"
+checks = [
+  "dependency-direction",
+  "crypto-isolation",
+  "backend-plaintext-boundary"
+]
+
+[agents.compliance]
+path = "agents/compliance-agent"
+severity_gate = "medium"
+checks = [
+  "gdpr-data-inventory",
+  "soc2-evidence",
+  "iso27001-risk-register",
+  "retention-policy"
+]
+
+[agents.qa]
+path = "agents/qa-agent"
+severity_gate = "medium"
+checks = [
+  "unit-tests",
+  "integration-tests",
+  "e2e-tests",
+  "performance-regression"
+]
+

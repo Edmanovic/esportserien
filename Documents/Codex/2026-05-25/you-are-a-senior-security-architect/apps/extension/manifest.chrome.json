@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "ESPASS",
+  "version": "0.1.0",
+  "description": "Zero-knowledge enterprise password manager extension.",
+  "permissions": ["activeTab", "scripting", "nativeMessaging"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://*/*"],
+      "js": ["src/content/autofill-guard.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+  },
+  "host_permissions": []
+}
+

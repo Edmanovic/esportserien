@@ -1,0 +1,9 @@
+{
+  "name": "malformed-handshake",
+  "description": "Send unsupported protocol versions, wrong extension origins, or malformed nonce lengths.",
+  "expected_result": "native messaging host rejects handshake before session creation",
+  "severity": "high",
+  "exploitability": 6,
+  "mitigation": "strict schema validation, origin pinning, protocol version checks"
+}
+

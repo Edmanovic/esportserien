@@ -1,0 +1,9 @@
+{
+  "name": "vault-corruption",
+  "description": "Corrupt the local encrypted vault file, revision fields, nonce, or integrity tag.",
+  "expected_result": "vault persistence engine refuses to decrypt and reports integrity failure",
+  "severity": "critical",
+  "exploitability": 8,
+  "mitigation": "atomic writes, AEAD, local keyed integrity tag, schema version validation"
+}
+

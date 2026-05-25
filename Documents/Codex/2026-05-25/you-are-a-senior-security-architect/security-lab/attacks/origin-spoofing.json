@@ -1,0 +1,8 @@
+{
+  "name": "origin-spoofing",
+  "description": "Attempt autofill from a cross-origin iframe or punycode spoofed hostname.",
+  "expected_result": "extension blocks autofill before contacting native host",
+  "severity": "critical",
+  "exploitability": 9,
+  "mitigation": "exact origin matching, iframe blocking, punycode suspicion, user gesture gating"
+}

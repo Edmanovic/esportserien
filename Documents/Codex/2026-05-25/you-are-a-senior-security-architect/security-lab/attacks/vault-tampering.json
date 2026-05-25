@@ -1,0 +1,8 @@
+{
+  "name": "vault-tampering",
+  "description": "Flip bits in encrypted vault payloads and alter authenticated metadata.",
+  "expected_result": "crypto-core rejects decryption with authentication failure",
+  "severity": "critical",
+  "exploitability": 8,
+  "mitigation": "AEAD tags plus local HMAC integrity tags over deterministic metadata"
+}

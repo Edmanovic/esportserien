@@ -1,0 +1,8 @@
+{
+  "name": "ipc-replay",
+  "description": "Replay a previously signed IPC envelope with the same counter.",
+  "expected_result": "desktop rejects the message with IPC replay detected",
+  "severity": "high",
+  "exploitability": 7,
+  "mitigation": "monotonic per-session counters and short IPC session TTL"
+}

@@ -1,0 +1,17 @@
+[package]
+name = "espass-security-events"
+version = "0.1.0"
+description = "Privacy-safe security event schemas for ESPASS."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { version = "1.0.203", features = ["derive"] }
+time = { version = "0.3.36", features = ["serde", "formatting"] }
+uuid = { version = "1.8.0", features = ["serde", "v4"] }
+
+[lints]
+workspace = true
+

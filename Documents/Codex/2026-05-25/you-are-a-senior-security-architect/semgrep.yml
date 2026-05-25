@@ -1,0 +1,17 @@
+rules:
+  - id: espass-no-localstorage-secrets
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: Do not use localStorage for ESPASS secrets or session material.
+    pattern: localStorage.$METHOD(...)
+  - id: espass-no-eval
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: eval is prohibited in ESPASS extension and desktop code.
+    pattern: eval(...)
+  - id: espass-no-dangerous-html
+    languages: [typescript, javascript, tsx, jsx]
+    severity: ERROR
+    message: unsafe HTML rendering is prohibited without a security ADR.
+    pattern: dangerouslySetInnerHTML
+

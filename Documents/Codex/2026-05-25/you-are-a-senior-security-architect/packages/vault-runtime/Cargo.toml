@@ -1,0 +1,28 @@
+[package]
+name = "espass-vault-runtime"
+version = "0.1.0"
+description = "Secure local vault runtime, persistence, IPC, autofill, and device trust for ESPASS."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+espass-crypto-core = { version = "0.1.0", path = "../crypto-core" }
+espass-shared-types = { version = "0.1.0", path = "../shared-types" }
+hmac = "0.12.1"
+rand_core = { version = "0.6.4", features = ["getrandom"] }
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = "1.0.117"
+sha2 = "0.10.8"
+subtle = "2.6.1"
+thiserror = "1.0.61"
+time = { version = "0.3.36", features = ["serde", "formatting", "parsing"] }
+uuid = { version = "1.8.0", features = ["serde", "v4"] }
+zeroize = { version = "1.8.1", features = ["derive"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3.10.1"

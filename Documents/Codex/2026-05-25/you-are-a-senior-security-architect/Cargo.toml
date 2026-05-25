@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+members = [
+  "apps/backend",
+  "apps/desktop/native-messaging-host",
+  "packages/crypto-core",
+  "packages/security-events",
+  "packages/shared-types",
+  "packages/vault-runtime"
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://example.invalid/espass"
+rust-version = "1.95"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+panic = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+todo = "warn"
+
+[profile.release]
+debug = "none"
+strip = "symbols"
+codegen-units = 1
+lto = "thin"
+panic = "abort"

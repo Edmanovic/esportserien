@@ -1,0 +1,11 @@
+{
+  "name": "espass",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "security-lab": "node security-lab/run-security-lab.mjs"
+  },
+  "devDependencies": {}
+}
+
