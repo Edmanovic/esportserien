@@ -6,6 +6,7 @@
 
 mod security;
 mod rate_limit;
+mod anomaly;
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
@@ -18,6 +19,7 @@ use axum::{Json, Router};
 use espass_shared_types::device::{DeviceIdentity, DeviceRegistration};
 use espass_shared_types::vault::{EncryptedPayload, VaultItem};
 use security::{RateLimiter, RequestReplayProtector, UploadIntegrityVerifier};
+use anomaly::AnomalyDetector;
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -26,6 +28,7 @@ struct AppState {
     devices: Arc<RwLock<BTreeMap<Uuid, DeviceIdentity>>>,
     rate_limiter: Arc<RwLock<RateLimiter>>,
     replay: Arc<RwLock<RequestReplayProtector>>,
+    anomaly: Arc<RwLock<AnomalyDetector>>,
 }
 
 impl Default for AppState {
@@ -35,6 +38,7 @@ impl Default for AppState {
             devices: Arc::new(RwLock::new(BTreeMap::new())),
             rate_limiter: Arc::new(RwLock::new(RateLimiter::new(120, 60))),
             replay: Arc::new(RwLock::new(RequestReplayProtector::default())),
+            anomaly: Arc::new(RwLock::new(AnomalyDetector::new(60, 200))),
         }
     }
 }
