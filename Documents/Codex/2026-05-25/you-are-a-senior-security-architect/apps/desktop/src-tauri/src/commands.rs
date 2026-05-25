@@ -393,15 +393,18 @@ pub fn generate_password(
     let length = length.clamp(8, 64) as usize;
     let chars: Vec<char> = charset.chars().collect();
     let n = chars.len();
+    debug_assert!(n <= 256, "charset larger than byte range — rejection sampling would loop forever");
     let threshold = 256 - (256 % n);
 
     let mut result = String::with_capacity(length);
-    while result.len() < length {
+    let mut accepted = 0usize;
+    while accepted < length {
         let batch = random_vec(length * 2).map_err(|_| "random generation failed".to_string())?;
         for byte in batch {
-            if result.len() >= length { break; }
+            if accepted >= length { break; }
             if (byte as usize) < threshold {
                 result.push(chars[byte as usize % n]);
+                accepted += 1;
             }
         }
     }
