@@ -241,6 +241,13 @@ function renderDetailHTML(cred) {
 function renderAddModalHTML() {
   const isEdit = state.modalMode === 'edit';
   const editing = isEdit ? state.credentials.find(c => c.id === state.editingId) : null;
+  if (isEdit && !editing) {
+    // Credential no longer in state — abort edit silently.
+    state.modalMode = 'add';
+    state.editingId = null;
+    state.showAddModal = false;
+    return '';
+  }
   const prefillTitle = editing?.title ?? '';
   const prefillUsername = editing?.username ?? '';
   const prefillUrl = editing?.url ?? '';
@@ -397,7 +404,8 @@ function bindVaultEvents() {
       state.editingId = id;
       state.showAddModal = true;
       renderUnlocked();
-      $('#add-password').value = cred.password ?? '';
+      const pwInput = $('#add-password');
+      if (pwInput) pwInput.value = cred.password ?? '';
       $('#add-title')?.focus();
     } catch (err) {
       alert(`Could not load credential: ${err}`);
