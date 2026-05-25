@@ -1,0 +1,64 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+  id-token: write  # Required for Sigstore OIDC token
+
+jobs:
+  build-and-sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+
+      - name: Build release artifacts
+        run: cargo build --release --workspace --exclude espass-desktop
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign native messaging host binary
+        run: |
+          cosign sign-blob \
+            --yes \
+            --output-certificate native-messaging-host.pem \
+            --output-signature native-messaging-host.sig \
+            target/release/espass-native-messaging-host
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+
+      - name: Compute SHA-256 checksums
+        run: |
+          sha256sum target/release/espass-native-messaging-host > checksums.sha256
+          sha256sum target/release/espass-backend >> checksums.sha256
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-artifacts
+          path: |
+            target/release/espass-native-messaging-host
+            target/release/espass-backend
+            native-messaging-host.pem
+            native-messaging-host.sig
+            checksums.sha256
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+
+      - name: Run tests
+        run: cargo test --workspace --exclude espass-desktop
