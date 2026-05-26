@@ -27,12 +27,18 @@ function renderLocked(root: HTMLElement): void {
     btn.textContent = "Låser op...";
     pwInput.value = ""; // clear immediately before async send
 
-    const response = await chrome.runtime.sendMessage({ type: "unlock", password }) as Record<string, unknown> | undefined;
-
-    if (response?.type === "unlock_result" && response?.ok === true) {
-      await main();
-    } else {
-      errorDiv.textContent = "Forkert adgangskode";
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "unlock", password }) as Record<string, unknown>;
+      if (response?.type === "unlock_result" && response?.ok === true) {
+        await main();
+      } else {
+        errorDiv.textContent = "Forkert adgangskode";
+        btn.disabled = false;
+        btn.textContent = "Lås op";
+        pwInput.focus();
+      }
+    } catch {
+      errorDiv.textContent = "Kunne ikke forbinde til ESPASS";
       btn.disabled = false;
       btn.textContent = "Lås op";
       pwInput.focus();
@@ -54,7 +60,11 @@ function renderReady(root: HTMLElement, autolockMinutes: number | null): void {
 
   const lockBtn = document.getElementById("lock-btn") as HTMLButtonElement;
   lockBtn.addEventListener("click", async () => {
-    await chrome.runtime.sendMessage({ type: "lock" });
+    try {
+      await chrome.runtime.sendMessage({ type: "lock" });
+    } catch {
+      // ignore — re-render will show unavailable state
+    }
     await main();
   });
 }

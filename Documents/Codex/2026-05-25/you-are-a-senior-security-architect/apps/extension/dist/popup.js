@@ -22,11 +22,18 @@ function renderLocked(root) {
     btn.disabled = true;
     btn.textContent = "L\xE5ser op...";
     pwInput.value = "";
-    const response = await chrome.runtime.sendMessage({ type: "unlock", password });
-    if (response?.type === "unlock_result" && response?.ok === true) {
-      await main();
-    } else {
-      errorDiv.textContent = "Forkert adgangskode";
+    try {
+      const response = await chrome.runtime.sendMessage({ type: "unlock", password });
+      if (response?.type === "unlock_result" && response?.ok === true) {
+        await main();
+      } else {
+        errorDiv.textContent = "Forkert adgangskode";
+        btn.disabled = false;
+        btn.textContent = "L\xE5s op";
+        pwInput.focus();
+      }
+    } catch {
+      errorDiv.textContent = "Kunne ikke forbinde til ESPASS";
       btn.disabled = false;
       btn.textContent = "L\xE5s op";
       pwInput.focus();
@@ -42,7 +49,10 @@ function renderReady(root, autolockMinutes) {
   `;
   const lockBtn = document.getElementById("lock-btn");
   lockBtn.addEventListener("click", async () => {
-    await chrome.runtime.sendMessage({ type: "lock" });
+    try {
+      await chrome.runtime.sendMessage({ type: "lock" });
+    } catch {
+    }
     await main();
   });
 }
