@@ -1,15 +1,12 @@
 //! Zero-knowledge cloud sync: HKDF auth derivation, push, pull.
 
-#[allow(unused_imports)]
 use espass_crypto_core::{MasterKey, VaultKey, EncryptedEnvelope};
-#[allow(unused_imports)]
 use espass_shared_types::vault::{EncryptedPayload, VaultItem};
 use hkdf::Hkdf;
 use sha2::Sha256;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-#[allow(unused_imports)]
 use crate::commands::{Credential, VaultContents};
 use crate::state::{AppState, ItemSyncRecord, SyncState, SyncStateFile, SyncStatus};
 
@@ -186,6 +183,145 @@ pub fn get_status(state: &AppState) -> SyncStatus {
         .unwrap_or(SyncStatus::NotConfigured)
 }
 
+// ── Per-item encryption / decryption ─────────────────────────────────────────
+
+pub fn encrypt_credential(
+    cred: &Credential,
+    vault_key: &VaultKey,
+    vault_id: &str,
+) -> Result<VaultItem, SyncError> {
+    let plaintext = serde_json::to_vec(cred)?;
+    let aad = format!("espass:item:v1:{vault_id}:{}", cred.id);
+    let envelope =
+        espass_crypto_core::encrypt(vault_key, &plaintext, aad.as_bytes())
+            .map_err(|e| SyncError::Crypto(e.to_string()))?;
+
+    let item_id = Uuid::parse_str(&cred.id)?;
+    let vault_uuid = Uuid::parse_str(vault_id)?;
+
+    Ok(VaultItem {
+        item_id,
+        vault_id: vault_uuid,
+        encrypted_payload: EncryptedPayload {
+            envelope_version: envelope.version,
+            nonce: envelope.nonce,
+            ciphertext: envelope.ciphertext,
+            aad_context: aad,
+        },
+        attachments: vec![],
+        revision: 0,
+        base_revision: None,
+        created_at: OffsetDateTime::from_unix_timestamp(cred.created_at)
+            .unwrap_or_else(|_| OffsetDateTime::now_utc()),
+        updated_at: OffsetDateTime::from_unix_timestamp(cred.updated_at)
+            .unwrap_or_else(|_| OffsetDateTime::now_utc()),
+        deleted_at: None,
+    })
+}
+
+pub fn decrypt_item(item: &VaultItem, vault_key: &VaultKey) -> Result<Credential, SyncError> {
+    let p = &item.encrypted_payload;
+    let envelope = EncryptedEnvelope {
+        version: p.envelope_version,
+        nonce: p.nonce,
+        ciphertext: p.ciphertext.clone(),
+    };
+    let plaintext = espass_crypto_core::decrypt(vault_key, &envelope, p.aad_context.as_bytes())
+        .map_err(|e| SyncError::Crypto(e.to_string()))?;
+    let cred: Credential = serde_json::from_slice(plaintext.expose_secret())?;
+    Ok(cred)
+}
+
+// ── Push (local → server) ─────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct SyncItemMetaResponse {
+    item_id: String,
+    updated_at: i64,
+    revision: u64,
+    deleted_at: Option<i64>,
+}
+
+/// Pushes dirty credentials and pending deletes to the server.
+/// Returns (pushed_count, conflicts_skipped).
+pub async fn push_all(
+    client: &reqwest::Client,
+    jwt: &str,
+    base_url: &str,
+    vault_id: &str,
+    contents: &VaultContents,
+    sf: &mut SyncStateFile,
+    vault_key: &VaultKey,
+) -> Result<(u32, u32), SyncError> {
+    let mut pushed = 0u32;
+    let mut conflicts_skipped = 0u32;
+
+    for cred in &contents.credentials {
+        let last_pushed = sf
+            .items
+            .get(&cred.id)
+            .map(|r| r.last_pushed_at)
+            .unwrap_or(0);
+
+        if cred.updated_at <= last_pushed {
+            continue; // not dirty
+        }
+
+        let base_rev = sf.items.get(&cred.id).map(|r| r.server_revision);
+        let mut item = encrypt_credential(cred, vault_key, vault_id)?;
+        item.base_revision = base_rev;
+
+        let url = format!("{base_url}/v1/vaults/{vault_id}/items/{}", cred.id);
+        let res = client
+            .put(&url)
+            .bearer_auth(jwt)
+            .json(&item)
+            .send()
+            .await?;
+
+        match res.status().as_u16() {
+            204 => {
+                sf.items.insert(
+                    cred.id.clone(),
+                    ItemSyncRecord {
+                        server_revision: base_rev.unwrap_or(0) + 1,
+                        last_pushed_at: cred.updated_at,
+                    },
+                );
+                pushed += 1;
+            }
+            409 => {
+                conflicts_skipped += 1;
+            }
+            code => return Err(SyncError::ServerError(code)),
+        }
+    }
+
+    // Push pending deletes
+    let deletes = std::mem::take(&mut sf.pending_deletes);
+    for id in deletes {
+        let base_rev = sf.items.get(&id).map(|r| r.server_revision);
+        let now = OffsetDateTime::now_utc();
+        let tombstone = Credential {
+            id: id.clone(), title: String::new(), username: String::new(),
+            password: String::new(), url: None,
+            created_at: now.unix_timestamp(), updated_at: now.unix_timestamp(),
+        };
+        let mut item = encrypt_credential(&tombstone, vault_key, vault_id)?;
+        item.deleted_at = Some(now);
+        item.base_revision = base_rev;
+
+        let url = format!("{base_url}/v1/vaults/{vault_id}/items/{id}");
+        let res = client.put(&url).bearer_auth(jwt).json(&item).send().await?;
+        if res.status().as_u16() != 204 && res.status().as_u16() != 409 {
+            // Re-queue if failed
+            sf.pending_deletes.push(id);
+        }
+    }
+
+    Ok((pushed, conflicts_skipped))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -212,5 +348,38 @@ mod tests {
         let k1 = MasterKey::from_bytes([0x11; 32]);
         let k2 = MasterKey::from_bytes([0x22; 32]);
         assert_ne!(derive_auth_secret(&k1), derive_auth_secret(&k2));
+    }
+
+    #[test]
+    fn encrypt_decrypt_credential_round_trip() {
+        let vault_key = VaultKey::from_bytes([0x55; 32]);
+        let vault_id = "aaaaaaaa-0000-0000-0000-000000000001";
+        let cred = Credential {
+            id: "bbbbbbbb-0000-0000-0000-000000000002".into(),
+            title: "Test".into(),
+            username: "user@test.com".into(),
+            password: "p@ss".into(),
+            url: Some("https://test.com".into()),
+            created_at: 1_000_000,
+            updated_at: 1_000_001,
+        };
+        let item = encrypt_credential(&cred, &vault_key, vault_id).unwrap();
+        let back = decrypt_item(&item, &vault_key).unwrap();
+        assert_eq!(back.title, cred.title);
+        assert_eq!(back.password, cred.password);
+    }
+
+    #[test]
+    fn wrong_key_fails_decrypt() {
+        let vault_key = VaultKey::from_bytes([0x55; 32]);
+        let wrong_key = VaultKey::from_bytes([0x66; 32]);
+        let vault_id = "aaaaaaaa-0000-0000-0000-000000000001";
+        let cred = Credential {
+            id: "bbbbbbbb-0000-0000-0000-000000000002".into(),
+            title: "T".into(), username: "u".into(), password: "p".into(),
+            url: None, created_at: 0, updated_at: 0,
+        };
+        let item = encrypt_credential(&cred, &vault_key, vault_id).unwrap();
+        assert!(decrypt_item(&item, &wrong_key).is_err());
     }
 }
