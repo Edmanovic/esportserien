@@ -1,5 +1,6 @@
 //! Shared Tauri application state.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -25,6 +26,7 @@ pub struct AppState {
     pub session: Mutex<Option<SessionRuntime>>,
     pub unlock_manager: Mutex<UnlockManager>,
     pub vault_dir: PathBuf,
+    pub sync: Mutex<Option<SyncState>>,
 }
 
 impl Default for AppState {
@@ -50,6 +52,7 @@ impl AppState {
             session: Mutex::new(None),
             unlock_manager: Mutex::new(UnlockManager::new(KdfParams::default())),
             vault_dir,
+            sync: Mutex::new(None),
         }
     }
 
@@ -69,5 +72,89 @@ impl AppState {
     #[must_use]
     pub fn vault_exists(&self) -> bool {
         self.meta_path().exists()
+    }
+
+    /// Path to the sync state file (no secrets — not encrypted).
+    #[must_use]
+    pub fn sync_state_path(&self) -> PathBuf {
+        self.vault_dir.join("sync_state.json")
+    }
+}
+
+// ── Sync state ────────────────────────────────────────────────────────────────
+
+/// Per-item sync record stored in sync_state.json (no secrets).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ItemSyncRecord {
+    pub server_revision: u64,
+    pub last_pushed_at: i64,
+}
+
+/// Sync configuration and item tracking file — written to disk, no secrets.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SyncStateFile {
+    pub server_url: String,
+    pub user_id: String,
+    pub vault_id: String,
+    pub last_synced_at: Option<i64>,
+    #[serde(default)]
+    pub pending_deletes: Vec<String>,
+    #[serde(default)]
+    pub items: HashMap<String, ItemSyncRecord>,
+}
+
+/// Live sync state held in RAM — contains JWT and refresh token.
+pub struct SyncState {
+    pub server_url: String,
+    pub user_id: Uuid,
+    pub vault_id: Uuid,
+    pub jwt: String,
+    pub refresh_token: String,
+    pub jwt_expires_at: i64,
+    pub last_synced_at: Option<i64>,
+    pub status: SyncStatus,
+}
+
+/// Observable sync status — safe to serialize and send to the frontend.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SyncStatus {
+    NotConfigured,
+    Idle { last_synced_at: i64 },
+    Syncing,
+    Error { message: String },
+    Unauthenticated,
+}
+
+#[cfg(test)]
+mod sync_state_tests {
+    use super::*;
+
+    #[test]
+    fn sync_state_file_round_trips() {
+        let sf = SyncStateFile {
+            server_url: "https://sync.example.com".into(),
+            user_id: "user-1".into(),
+            vault_id: "vault-1".into(),
+            last_synced_at: Some(1_000_000),
+            pending_deletes: vec!["id-a".into()],
+            items: {
+                let mut m = HashMap::new();
+                m.insert("id-a".into(), ItemSyncRecord { server_revision: 3, last_pushed_at: 999_000 });
+                m
+            },
+        };
+        let json = serde_json::to_string(&sf).unwrap();
+        let back: SyncStateFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.server_url, sf.server_url);
+        assert_eq!(back.pending_deletes, sf.pending_deletes);
+        assert_eq!(back.items["id-a"].server_revision, 3);
+    }
+
+    #[test]
+    fn sync_status_not_configured_serializes() {
+        let s = SyncStatus::NotConfigured;
+        let j = serde_json::to_string(&s).unwrap();
+        assert!(j.contains("not_configured"));
     }
 }
