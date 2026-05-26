@@ -27,6 +27,9 @@ pub fn run() {
             commands::import_credentials_json,
             commands::export_credentials_csv,
             commands::export_credentials_json,
+            commands::sync_configure,
+            commands::sync_now_cmd,
+            commands::get_sync_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

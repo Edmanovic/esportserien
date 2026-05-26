@@ -326,6 +326,15 @@ pub fn delete_credential(id: String, state: State<AppState>) -> Result<(), Strin
     }
     let mut meta = load_meta(&state)?;
     save_contents(&vault_key, vault_id, &contents, &mut meta, &state)?;
+
+    // Track pending delete for sync (best-effort — don't fail if sync not configured)
+    if let Ok(mut sf) = crate::sync::load_sync_state_file(&state) {
+        if !sf.pending_deletes.contains(&id) {
+            sf.pending_deletes.push(id);
+            let _ = crate::sync::save_sync_state_file(&state, &sf);
+        }
+    }
+
     Ok(())
 }
 
@@ -681,6 +690,69 @@ pub async fn export_credentials_json(
     let path = dest.into_path().map_err(|e| e.to_string())?;
     std::fs::write(&path, json.as_bytes()).map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+// ---------------------------------------------------------------------------
+// Sync commands
+// ---------------------------------------------------------------------------
+
+/// Result returned by sync_now — safe to serialize to JS.
+#[derive(Debug, serde::Serialize)]
+pub struct SyncResult {
+    pub pushed: u32,
+    pub pulled: u32,
+    pub deleted: u32,
+    pub conflicts_skipped: u32,
+}
+
+/// Configures sync by deriving auth_secret from master password and
+/// registering or logging in to the sync server.
+#[tauri::command]
+pub async fn sync_configure(
+    server_url: String,
+    email: String,
+    password: String,
+    register: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    use espass_crypto_core::derive_master_key;
+
+    // Load KDF params to re-derive master_key from password
+    let meta_bytes = std::fs::read(state.meta_path()).map_err(|e| e.to_string())?;
+    let meta: crate::state::VaultMeta =
+        serde_json::from_slice(&meta_bytes).map_err(|e| e.to_string())?;
+
+    let master_key =
+        derive_master_key(password.as_bytes(), &meta.salt, meta.kdf_params)
+            .map_err(|e| e.to_string())?;
+
+    let auth_secret = crate::sync::derive_auth_secret(&master_key);
+
+    crate::sync::configure(&server_url, &email, &auth_secret, register, &state)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Runs a full sync cycle (push + pull). Returns counts.
+#[tauri::command]
+pub async fn sync_now_cmd(
+    state: tauri::State<'_, AppState>,
+) -> Result<SyncResult, String> {
+    let result = crate::sync::sync_now(&state)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(SyncResult {
+        pushed: result.pushed,
+        pulled: result.pulled,
+        deleted: result.deleted,
+        conflicts_skipped: result.conflicts_skipped,
+    })
+}
+
+/// Returns the current sync status without exposing secrets.
+#[tauri::command]
+pub fn get_sync_status(state: tauri::State<'_, AppState>) -> crate::state::SyncStatus {
+    crate::sync::get_status(&state)
 }
 
 #[cfg(test)]
