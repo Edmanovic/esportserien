@@ -322,6 +322,212 @@ pub async fn push_all(
     Ok((pushed, conflicts_skipped))
 }
 
+// ── Pull (server → local) ─────────────────────────────────────────────────────
+
+/// Pulls new/updated/deleted items from the server and merges into contents.
+/// Returns (pulled_count, deleted_count).
+pub async fn pull_all(
+    client: &reqwest::Client,
+    jwt: &str,
+    base_url: &str,
+    vault_id: &str,
+    contents: &mut VaultContents,
+    sf: &mut SyncStateFile,
+    vault_key: &VaultKey,
+) -> Result<(u32, u32), SyncError> {
+    let mut pulled = 0u32;
+    let mut deleted = 0u32;
+
+    // 1. Get metadata list from server
+    let url = format!("{base_url}/v1/vaults/{vault_id}/items");
+    let res = client.get(&url).bearer_auth(jwt).send().await?;
+    if !res.status().is_success() {
+        return Err(SyncError::ServerError(res.status().as_u16()));
+    }
+    let metas: Vec<SyncItemMetaResponse> = res.json().await?;
+
+    for meta in metas {
+        // Handle deletes from server
+        if meta.deleted_at.is_some() {
+            let before = contents.credentials.len();
+            contents.credentials.retain(|c| c.id != meta.item_id);
+            if contents.credentials.len() < before {
+                deleted += 1;
+            }
+            sf.items.remove(&meta.item_id);
+            continue;
+        }
+
+        // Check if server version is newer than local
+        let local_ts = contents
+            .credentials
+            .iter()
+            .find(|c| c.id == meta.item_id)
+            .map(|c| c.updated_at)
+            .unwrap_or(0);
+
+        if meta.updated_at <= local_ts {
+            continue; // local is newer or equal
+        }
+
+        // Fetch full item
+        let item_url = format!("{base_url}/v1/vaults/{vault_id}/items/{}", meta.item_id);
+        let item_res = client.get(&item_url).bearer_auth(jwt).send().await?;
+        if !item_res.status().is_success() {
+            continue; // skip this item, try next time
+        }
+        let item: VaultItem = item_res.json().await?;
+
+        match decrypt_item(&item, vault_key) {
+            Ok(cred) => {
+                // Merge: replace existing or push new
+                if let Some(existing) = contents.credentials.iter_mut().find(|c| c.id == cred.id) {
+                    *existing = cred;
+                } else {
+                    contents.credentials.push(cred);
+                }
+                sf.items.insert(
+                    meta.item_id.clone(),
+                    ItemSyncRecord {
+                        server_revision: meta.revision,
+                        last_pushed_at: meta.updated_at,
+                    },
+                );
+                pulled += 1;
+            }
+            Err(_) => {} // skip corrupted items silently
+        }
+    }
+
+    Ok((pulled, deleted))
+}
+
+// ── sync_now ──────────────────────────────────────────────────────────────────
+
+pub struct SyncResult {
+    pub pushed: u32,
+    pub pulled: u32,
+    pub deleted: u32,
+    pub conflicts_skipped: u32,
+}
+
+/// Full sync cycle: refresh JWT if needed → push → pull → save state.
+pub async fn sync_now(state: &AppState) -> Result<SyncResult, SyncError> {
+    use espass_vault_runtime::{VaultPersistenceEngine, VaultStore};
+
+    // 1. Extract RAM state (release lock before async work)
+    let (server_url, vault_id_str, mut jwt, refresh_token, jwt_expires_at) = {
+        let sync = state.sync.lock().map_err(|_| SyncError::Poison)?;
+        let s = sync.as_ref().ok_or(SyncError::NotConfigured)?;
+        (
+            s.server_url.clone(),
+            s.vault_id.to_string(),
+            s.jwt.clone(),
+            s.refresh_token.clone(),
+            s.jwt_expires_at,
+        )
+    };
+
+    // 2. Refresh JWT if expires in < 60 seconds
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+    if jwt_expires_at - now < 60 {
+        let client = reqwest::Client::new();
+        let res = client
+            .post(format!("{}/v1/auth/refresh", server_url.trim_end_matches('/')))
+            .json(&serde_json::json!({ "refresh_token": refresh_token }))
+            .send()
+            .await?;
+        if res.status().is_success() {
+            #[derive(serde::Deserialize)]
+            struct RefreshResp { jwt: String, refresh_token: String, user_id: String, vault_id: String }
+            let r: RefreshResp = res.json().await?;
+            let new_exp = jwt_exp_from_token(&r.jwt);
+            let mut sync = state.sync.lock().map_err(|_| SyncError::Poison)?;
+            if let Some(s) = sync.as_mut() {
+                s.jwt = r.jwt.clone();
+                s.refresh_token = r.refresh_token;
+                s.jwt_expires_at = new_exp;
+            }
+            jwt = r.jwt;
+        }
+    }
+
+    // 3. Extract vault key bytes (drop lock before async work)
+    let key_bytes: [u8; 32] = {
+        let secrets = state.secrets.lock().map_err(|_| SyncError::Poison)?;
+        let key = secrets.vault_key().map_err(|_| SyncError::VaultLocked)?;
+        *key.expose_secret()
+    };
+    let vault_key = VaultKey::from_bytes(key_bytes);
+
+    // 4. Load vault meta + contents
+    let mut vault_meta: crate::state::VaultMeta = {
+        let bytes = std::fs::read(state.meta_path())?;
+        serde_json::from_slice(&bytes)?
+    };
+
+    let engine = VaultPersistenceEngine::new(VaultStore::new(state.data_path()));
+    let mut contents: VaultContents = if state.data_path().exists() {
+        let buf = engine.load_decrypted(&vault_key)
+            .map_err(|e| SyncError::Crypto(e.to_string()))?;
+        serde_json::from_slice(buf.expose_secret())?
+    } else {
+        VaultContents::default()
+    };
+
+    let mut sf = load_sync_state_file(state).unwrap_or_else(|_| SyncStateFile {
+        server_url: server_url.clone(),
+        user_id: String::new(),
+        vault_id: vault_id_str.clone(),
+        last_synced_at: None,
+        pending_deletes: Vec::new(),
+        items: std::collections::HashMap::new(),
+    });
+
+    // 5. Set status to Syncing
+    {
+        let mut sync = state.sync.lock().map_err(|_| SyncError::Poison)?;
+        if let Some(s) = sync.as_mut() {
+            s.status = crate::state::SyncStatus::Syncing;
+        }
+    }
+
+    let client = reqwest::Client::new();
+    let base = server_url.trim_end_matches('/');
+
+    // 6. Push
+    let (pushed, conflicts_skipped) =
+        push_all(&client, &jwt, base, &vault_id_str, &contents, &mut sf, &vault_key).await?;
+
+    // 7. Pull
+    let (pulled, deleted) =
+        pull_all(&client, &jwt, base, &vault_id_str, &mut contents, &mut sf, &vault_key).await?;
+
+    // 8. Save merged vault contents
+    let json = serde_json::to_vec(&contents)?;
+    let record = engine
+        .persist(&vault_key, vault_meta.vault_id, &json, Some(vault_meta.data_revision))
+        .map_err(|e| SyncError::Crypto(e.to_string()))?;
+    vault_meta.data_revision = record.local_revision;
+    let meta_json = serde_json::to_vec_pretty(&vault_meta)?;
+    std::fs::write(state.meta_path(), &meta_json)?;
+
+    // 9. Save sync state file and update RAM status
+    let now_ts = OffsetDateTime::now_utc().unix_timestamp();
+    sf.last_synced_at = Some(now_ts);
+    save_sync_state_file(state, &sf)?;
+
+    {
+        let mut sync = state.sync.lock().map_err(|_| SyncError::Poison)?;
+        if let Some(s) = sync.as_mut() {
+            s.last_synced_at = Some(now_ts);
+            s.status = crate::state::SyncStatus::Idle { last_synced_at: now_ts };
+        }
+    }
+
+    Ok(SyncResult { pushed, pulled, deleted, conflicts_skipped })
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
