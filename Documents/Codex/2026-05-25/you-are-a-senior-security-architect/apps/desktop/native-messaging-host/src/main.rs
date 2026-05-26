@@ -6,8 +6,6 @@
 //! Tauri desktop app's local WebSocket IPC server, then forwards messages
 //! in both directions until stdin closes or the WebSocket disconnects.
 
-#![allow(clippy::expect_used)]
-
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_tungstenite::tungstenite::Message;
@@ -73,6 +71,9 @@ async fn run() -> Result<(), &'static str> {
     Ok(())
 }
 
+/// Read the IPC port from the file written by the Tauri desktop app.
+/// Windows-only: uses `%APPDATA%\espass\ipc.port`.
+/// See `AppState::default()` in the desktop crate for cross-platform path logic.
 fn read_ipc_port() -> Result<u16, &'static str> {
     let appdata = std::env::var("APPDATA").map_err(|_| "desktop-unavailable")?;
     let path = std::path::Path::new(&appdata)
@@ -138,5 +139,39 @@ mod tests {
         let mut cursor = std::io::Cursor::new(vec![]);
         let result = read_native_msg(&mut cursor).await.unwrap();
         assert_eq!(result, None);
+    }
+
+    #[tokio::test]
+    async fn read_rejects_oversized_message() {
+        // A length header of 1_048_577 (> 1 MB) must return Err, not allocate.
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&1_048_577u32.to_le_bytes()); // 4-byte LE header
+        let mut cursor = std::io::Cursor::new(buf);
+        let result = read_native_msg(&mut cursor).await;
+        assert!(result.is_err(), "oversized message should return Err");
+    }
+
+    #[tokio::test]
+    async fn write_rejects_oversized_message() {
+        // A text string of 1_048_577 bytes must return Err on write.
+        let oversized = "x".repeat(1_048_577);
+        let mut buf: Vec<u8> = Vec::new();
+        let result = write_native_msg(&mut buf, &oversized).await;
+        assert!(result.is_err(), "writing oversized message should return Err");
+    }
+
+    #[tokio::test]
+    async fn read_rejects_invalid_utf8() {
+        // Valid 4-byte length header pointing to invalid UTF-8 bytes.
+        let body: Vec<u8> = vec![0xFF, 0xFE, 0x00, 0x01]; // invalid UTF-8
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        buf.extend_from_slice(&body);
+        let mut cursor = std::io::Cursor::new(buf);
+        let result = read_native_msg(&mut cursor).await;
+        assert!(result.is_err(), "invalid UTF-8 should return Err");
+        if let Err(e) = result {
+            assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+        }
     }
 }
