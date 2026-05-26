@@ -12,7 +12,7 @@ use crate::AppState;
 
 /// An item stored inside the encrypted vault.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Credential {
+pub(crate) struct Credential {
     pub id: String,
     pub title: String,
     pub username: String,
@@ -33,7 +33,7 @@ pub struct CredentialSummary {
 
 /// The entire vault contents as a JSON blob (encrypted on disk).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
-pub struct VaultContents {
+pub(crate) struct VaultContents {
     pub credentials: Vec<Credential>,
 }
 
@@ -41,7 +41,7 @@ pub struct VaultContents {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn load_meta(state: &AppState) -> Result<VaultMeta, String> {
+pub(crate) fn load_meta(state: &AppState) -> Result<VaultMeta, String> {
     let bytes = std::fs::read(state.meta_path()).map_err(|e| e.to_string())?;
     serde_json::from_slice(&bytes).map_err(|e| e.to_string())
 }
@@ -53,7 +53,7 @@ fn save_meta(state: &AppState, meta: &VaultMeta) -> Result<(), String> {
     Ok(())
 }
 
-fn load_contents(
+pub(crate) fn load_contents(
     key: &espass_crypto_core::VaultKey,
     state: &AppState,
 ) -> Result<VaultContents, String> {
@@ -235,6 +235,7 @@ pub fn list_credentials(state: State<AppState>) -> Result<Vec<CredentialSummary>
     let secrets = state.secrets.lock().map_err(|e| e.to_string())?;
     let key = secrets.vault_key().map_err(|_| "Vault is locked".to_string())?;
     let contents = load_contents(key, &state)?;
+    state.touch_vault_access();
     Ok(contents
         .credentials
         .iter()
@@ -282,6 +283,7 @@ pub fn add_credential(
     });
     let mut meta = load_meta(&state)?;
     save_contents(&vault_key, vault_id, &contents, &mut meta, &state)?;
+    state.touch_vault_access();
     Ok(id)
 }
 
@@ -298,11 +300,13 @@ pub fn get_credential(id: String, state: State<AppState>) -> Result<Credential, 
     let vault_key = espass_crypto_core::VaultKey::from_bytes(key_bytes);
 
     let contents = load_contents(&vault_key, &state)?;
-    contents
+    let result = contents
         .credentials
         .into_iter()
         .find(|c| c.id == id)
-        .ok_or_else(|| "Credential not found".to_string())
+        .ok_or_else(|| "Credential not found".to_string());
+    if result.is_ok() { state.touch_vault_access(); }
+    result
 }
 
 /// Deletes a credential by UUID.
@@ -335,6 +339,7 @@ pub fn delete_credential(id: String, state: State<AppState>) -> Result<(), Strin
         }
     }
 
+    state.touch_vault_access();
     Ok(())
 }
 
@@ -373,6 +378,7 @@ pub fn update_credential(
 
     let mut meta = load_meta(&state)?;
     save_contents(&vault_key, vault_id, &contents, &mut meta, &state)?;
+    state.touch_vault_access();
     Ok(())
 }
 

@@ -1,6 +1,7 @@
 //! ESPASS desktop application library entry point.
 
 mod commands;
+mod ipc_server;
 mod state;
 mod sync;
 
