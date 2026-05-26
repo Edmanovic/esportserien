@@ -32,7 +32,8 @@ pub struct AppState {
     // IPC / tray
     /// Broadcast sender — send `()` to notify all WebSocket clients the vault locked.
     pub lock_notify_tx: tokio::sync::broadcast::Sender<()>,
-    /// Configured auto-lock duration. `None` = never.
+    /// Configured auto-lock duration in minutes. `None` = never.
+    /// Default is `Some(15)` — locks after 15 minutes of inactivity.
     pub autolock_minutes: Mutex<Option<u32>>,
     /// Unix timestamp of the last vault access (find/get/unlock). Used by auto-lock timer.
     pub last_vault_access: Arc<AtomicI64>,
@@ -97,11 +98,13 @@ impl AppState {
     }
 
     /// Records that the vault was accessed right now; resets the auto-lock timer.
+    /// The store uses `Release` ordering so the auto-lock timer can use `Acquire`
+    /// on the load and see a consistent view of all prior vault state writes.
     pub fn touch_vault_access(&self) {
         use std::sync::atomic::Ordering;
         self.last_vault_access.store(
             time::OffsetDateTime::now_utc().unix_timestamp(),
-            Ordering::Relaxed,
+            Ordering::Release,
         );
     }
 }
@@ -197,5 +200,13 @@ mod ipc_state_tests {
         state.touch_vault_access();
         let after = state.last_vault_access.load(Ordering::Relaxed);
         assert!(after > 0, "timestamp should be set after touch");
+    }
+
+    #[test]
+    fn lock_notify_tx_broadcasts_to_subscriber() {
+        let state = AppState::new(std::path::PathBuf::from("test-vault-notify"));
+        let mut rx = state.lock_notify_tx.subscribe();
+        state.lock_notify_tx.send(()).expect("send failed");
+        rx.try_recv().expect("subscriber should have received the notification");
     }
 }
