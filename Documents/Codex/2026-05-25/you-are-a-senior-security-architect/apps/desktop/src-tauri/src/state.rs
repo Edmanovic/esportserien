@@ -2,7 +2,8 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::AtomicI64;
+use std::sync::{Arc, Mutex};
 
 use espass_crypto_core::{EncryptedEnvelope, KdfParams, Salt};
 use espass_vault_runtime::{RuntimeSecretStore, SessionRuntime, UnlockManager};
@@ -26,7 +27,17 @@ pub struct AppState {
     pub session: Mutex<Option<SessionRuntime>>,
     pub unlock_manager: Mutex<UnlockManager>,
     pub vault_dir: PathBuf,
+    // Sync (added by sync plan)
     pub sync: Mutex<Option<SyncState>>,
+    // IPC / tray
+    /// Broadcast sender — send `()` to notify all WebSocket clients the vault locked.
+    pub lock_notify_tx: tokio::sync::broadcast::Sender<()>,
+    /// Configured auto-lock duration. `None` = never.
+    pub autolock_minutes: Mutex<Option<u32>>,
+    /// Unix timestamp of the last vault access (find/get/unlock). Used by auto-lock timer.
+    pub last_vault_access: Arc<AtomicI64>,
+    /// Port the IPC WebSocket server is listening on (set after startup).
+    pub ipc_port: Mutex<Option<u16>>,
 }
 
 impl Default for AppState {
@@ -47,12 +58,17 @@ impl Default for AppState {
 impl AppState {
     #[must_use]
     pub fn new(vault_dir: PathBuf) -> Self {
+        let (lock_notify_tx, _) = tokio::sync::broadcast::channel(16);
         Self {
             secrets: Mutex::new(RuntimeSecretStore::locked()),
             session: Mutex::new(None),
             unlock_manager: Mutex::new(UnlockManager::new(KdfParams::default())),
             vault_dir,
             sync: Mutex::new(None),
+            lock_notify_tx,
+            autolock_minutes: Mutex::new(Some(15)),
+            last_vault_access: Arc::new(AtomicI64::new(0)),
+            ipc_port: Mutex::new(None),
         }
     }
 
@@ -78,6 +94,15 @@ impl AppState {
     #[must_use]
     pub fn sync_state_path(&self) -> PathBuf {
         self.vault_dir.join("sync_state.json")
+    }
+
+    /// Records that the vault was accessed right now; resets the auto-lock timer.
+    pub fn touch_vault_access(&self) {
+        use std::sync::atomic::Ordering;
+        self.last_vault_access.store(
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            Ordering::Relaxed,
+        );
     }
 }
 
@@ -156,5 +181,21 @@ mod sync_state_tests {
         let s = SyncStatus::NotConfigured;
         let j = serde_json::to_string(&s).unwrap();
         assert!(j.contains("not_configured"));
+    }
+}
+
+#[cfg(test)]
+mod ipc_state_tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn touch_vault_access_updates_timestamp() {
+        let state = AppState::new(std::path::PathBuf::from("test-vault-ipc"));
+        let before = state.last_vault_access.load(Ordering::Relaxed);
+        assert_eq!(before, 0);
+        state.touch_vault_access();
+        let after = state.last_vault_access.load(Ordering::Relaxed);
+        assert!(after > 0, "timestamp should be set after touch");
     }
 }
