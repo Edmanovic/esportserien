@@ -14,6 +14,8 @@ const state = {
   modalMode: 'add',   // 'add' | 'edit'
   editingId: null,    // credential id being edited
   revealPassword: false,
+  syncStatus: null,      // SyncStatus from backend
+  showSyncModal: false,  // sync settings modal
 };
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
@@ -185,7 +187,13 @@ function renderUnlocked() {
               <hr>
               <button id="export-csv-btn">Export CSV</button>
               <button id="export-json-btn">Export JSON</button>
+              <hr>
+              <button id="sync-settings-btn">Sync-indstillinger</button>
             </div>
+          </div>
+          <div class="sync-wrap">
+            <button class="btn btn--ghost" id="sync-btn" title="Synkroniser nu">↻</button>
+            <span class="sync-status-label" id="sync-status-label">${syncStatusLabel(state.syncStatus)}</span>
           </div>
           <button class="btn btn--ghost" id="lock-btn">Lock</button>
           <button class="btn btn--primary" id="add-btn">+ Add</button>
@@ -220,6 +228,8 @@ function renderUnlocked() {
 
       <!-- Add modal -->
       ${state.showAddModal ? renderAddModalHTML() : ''}
+      <!-- Sync settings modal -->
+      ${state.showSyncModal ? renderSyncModalHTML() : ''}
       <!-- Hidden import file inputs -->
       <input type="file" id="import-file-input" accept=".csv" style="display:none">
       <input type="file" id="import-json-input" accept=".json" style="display:none">
@@ -319,6 +329,36 @@ function renderAddModalHTML() {
           <div class="modal__actions">
             <button type="button" class="btn btn--ghost" id="add-cancel">Cancel</button>
             <button type="submit" class="btn btn--primary" id="add-save">${isEdit ? 'Save changes' : 'Save'}</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+}
+
+function renderSyncModalHTML() {
+  const url = state.syncStatus?.server_url ?? '';
+  return `
+    <div class="modal-overlay" id="sync-modal-overlay">
+      <div class="modal" role="dialog" aria-modal="true" aria-label="Sync-indstillinger">
+        <h3 class="modal__title">Sync-indstillinger</h3>
+        <form id="sync-form" autocomplete="off" novalidate>
+          <div class="field">
+            <label for="sync-url">Server URL</label>
+            <input id="sync-url" type="url" placeholder="https://sync.example.com" value="${esc(url)}" required>
+          </div>
+          <div class="field">
+            <label for="sync-email">E-mail</label>
+            <input id="sync-email" type="email" placeholder="user@example.com" required>
+          </div>
+          <div class="field">
+            <label for="sync-password">Master password</label>
+            <input id="sync-password" type="password" placeholder="Dit master password" required>
+          </div>
+          <div id="sync-error" class="error-msg" hidden></div>
+          <div class="modal__actions">
+            <button type="button" class="btn btn--ghost" id="sync-cancel">Annuller</button>
+            <button type="button" class="btn btn--ghost" id="sync-register-btn">Opret konto</button>
+            <button type="submit" class="btn btn--primary" id="sync-login-btn">Log ind</button>
           </div>
         </form>
       </div>
@@ -437,6 +477,74 @@ function bindVaultEvents() {
       showToast(`Export failed: ${err}`, 'error');
     }
   });
+
+  // Sync settings open
+  $('#sync-settings-btn')?.addEventListener('click', () => {
+    const menu = $('#tools-menu');
+    if (menu) menu.style.display = 'none';
+    state.showSyncModal = true;
+    renderUnlocked();
+  });
+
+  // Sync now button
+  $('#sync-btn')?.addEventListener('click', async () => {
+    const btn = $('#sync-btn');
+    if (btn) { btn.disabled = true; btn.textContent = '…'; }
+    try {
+      const result = await invoke('sync_now_cmd');
+      await refreshSyncStatus();
+      showToast(`Synkroniseret: ${result.pushed} sendt, ${result.pulled} modtaget${result.conflicts_skipped ? `, ${result.conflicts_skipped} konflikter sprunget over` : ''}`);
+    } catch (err) {
+      showToast(`Sync fejlede: ${err}`, 'error');
+      await refreshSyncStatus();
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '↻'; }
+    }
+  });
+
+  // Sync modal events
+  if (state.showSyncModal) {
+    $('#sync-modal-overlay')?.addEventListener('click', (e) => {
+      if (e.target.id === 'sync-modal-overlay') closeSyncModal();
+    });
+    $('#sync-cancel')?.addEventListener('click', closeSyncModal);
+
+    const syncSubmit = async (register) => {
+      const url = $('#sync-url').value.trim();
+      const email = $('#sync-email').value.trim();
+      const password = $('#sync-password').value;
+      const errEl = $('#sync-error');
+      errEl.hidden = true;
+
+      if (!url || !email || !password) {
+        showError(errEl, 'Alle felter skal udfyldes.');
+        return;
+      }
+      const saveBtn = register ? $('#sync-register-btn') : $('#sync-login-btn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = register ? 'Opretter…' : 'Logger ind…';
+
+      try {
+        await invoke('sync_configure', { serverUrl: url, email, password, register });
+        await refreshSyncStatus();
+        closeSyncModal();
+        showToast('Sync konfigureret — synkroniserer nu…');
+        try {
+          const result = await invoke('sync_now_cmd');
+          await refreshSyncStatus();
+          state.credentials = await invoke('list_credentials');
+          renderUnlocked();
+        } catch { /* first sync error is non-fatal */ }
+      } catch (err) {
+        showError(errEl, `Fejl: ${err}`);
+        saveBtn.disabled = false;
+        saveBtn.textContent = register ? 'Opret konto' : 'Log ind';
+      }
+    };
+
+    $('#sync-register-btn')?.addEventListener('click', () => syncSubmit(true));
+    $('#sync-form')?.addEventListener('submit', (e) => { e.preventDefault(); syncSubmit(false); });
+  }
 
   // Lock
   $('#lock-btn')?.addEventListener('click', async () => {
@@ -694,10 +802,16 @@ function closeAddModal() {
   renderUnlocked();
 }
 
+function closeSyncModal() {
+  state.showSyncModal = false;
+  renderUnlocked();
+}
+
 // ─── Boot sequence ────────────────────────────────────────────────────────────
 async function bootUnlocked() {
   try {
     state.credentials = await invoke('list_credentials');
+    try { state.syncStatus = await invoke('get_sync_status'); } catch { /* ignore */ }
   } catch {
     state.credentials = [];
   }
@@ -723,6 +837,28 @@ function showToast(msg, type = 'success', durationMs = 3000) {
     el.style.animation = 'toast-out .3s ease forwards';
     setTimeout(() => el.remove(), 300);
   }, durationMs);
+}
+
+function syncStatusLabel(status) {
+  if (!status || status.type === 'not_configured') return 'Ikke konfigureret';
+  if (status.type === 'syncing') return 'Synkroniserer…';
+  if (status.type === 'idle') {
+    const d = new Date(status.last_synced_at * 1000);
+    return `Synkroniseret ${d.toLocaleTimeString('da-DK', { hour: '2-digit', minute: '2-digit' })}`;
+  }
+  if (status.type === 'error') return 'Sync fejlede';
+  if (status.type === 'unauthenticated') return 'Ikke logget ind';
+  return '';
+}
+
+async function refreshSyncStatus() {
+  try {
+    state.syncStatus = await invoke('get_sync_status');
+    const label = document.getElementById('sync-status-label');
+    if (label) label.textContent = syncStatusLabel(state.syncStatus);
+    const btn = document.getElementById('sync-btn');
+    if (btn) btn.disabled = state.syncStatus?.type === 'syncing';
+  } catch { /* ignore */ }
 }
 
 async function boot() {
