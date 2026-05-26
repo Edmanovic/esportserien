@@ -8,6 +8,7 @@ mod security;
 mod rate_limit;
 mod anomaly;
 mod db;
+mod auth;
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
