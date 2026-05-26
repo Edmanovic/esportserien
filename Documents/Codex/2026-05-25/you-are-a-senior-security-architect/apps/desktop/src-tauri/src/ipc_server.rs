@@ -46,6 +46,12 @@ async fn accept_loop(
         tauri::async_runtime::spawn(handle_connection(stream, app));
     }
     let _ = std::fs::remove_file(&port_path);
+    {
+        let state = app.state::<AppState>();
+        if let Ok(mut p) = state.ipc_port.lock() {
+            *p = None;
+        };
+    }
 }
 
 async fn handle_connection(stream: tokio::net::TcpStream, app: tauri::AppHandle) {
@@ -75,7 +81,7 @@ async fn handle_connection(stream: tokio::net::TcpStream, app: tauri::AppHandle)
                     _ => {}
                 }
             }
-            Ok(()) = lock_rx.recv() => {
+            _ = lock_rx.recv() => {
                 let _ = sink.send(Message::Text(
                     r#"{"type":"vault_locked"}"#.into()
                 )).await;
