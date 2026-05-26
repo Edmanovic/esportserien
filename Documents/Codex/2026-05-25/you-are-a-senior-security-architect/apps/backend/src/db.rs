@@ -45,6 +45,8 @@ fn create_schema(conn: &Connection) -> SqlResult<()> {
             expires_at INTEGER NOT NULL,
             created_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
+
+        CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
     ",
     )
 }
@@ -116,7 +118,8 @@ pub struct UserRow {
     pub vault_id: String,
 }
 
-/// Creates a new user. Returns `Err` if the email is already taken.
+/// Creates a new user. `auth_hash` must be an Argon2id PHC string (e.g. from `argon2::PasswordHasher::hash_password`).
+/// Returns `Err` if the email is already taken (SQLITE_CONSTRAINT).
 pub fn create_user(
     conn: &Connection,
     id: &str,
@@ -183,7 +186,10 @@ pub fn validate_refresh_token(
 
 /// Deletes a refresh token (used on refresh to rotate it).
 pub fn delete_refresh_token(conn: &Connection, token: &str) -> SqlResult<()> {
-    conn.execute("DELETE FROM refresh_tokens WHERE token = ?1", params![token])?;
+    let changed = conn.execute("DELETE FROM refresh_tokens WHERE token = ?1", params![token])?;
+    if changed == 0 {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
     Ok(())
 }
 
