@@ -23,6 +23,12 @@ pub async fn run_ipc_server(app: tauri::AppHandle) -> Result<u16, String> {
     std::fs::create_dir_all(&vault_dir).map_err(|e| e.to_string())?;
     let port_path = vault_dir.join("ipc.port");
     std::fs::write(&port_path, port.to_string()).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(&port_path, perms).map_err(|e| e.to_string())?;
+    }
     *state.ipc_port.lock().map_err(|e| e.to_string())? = Some(port);
 
     tauri::async_runtime::spawn(accept_loop(listener, app, port_path));
@@ -255,19 +261,27 @@ fn handle_get_credential(v: &serde_json::Value, state: &AppState) -> serde_json:
 // eTLD+1 matching
 // ---------------------------------------------------------------------------
 
-/// Extract the effective TLD+1 from an HTTPS URL.
-/// Returns `None` for HTTP URLs or malformed/single-label hosts.
+/// Returns the registered domain (eTLD+1) of a URL, or None if not determinable.
+/// Only HTTPS URLs are accepted; HTTP, single-label, and IP addresses return None.
+/// Uses the Mozilla public suffix list via the `psl` crate so that multi-part
+/// public suffixes (co.uk, azurewebsites.net, github.io, …) are handled
+/// correctly: `bank.co.uk` and `evil.co.uk` will NOT match each other.
 fn extract_etld1(url: &str) -> Option<String> {
-    if !url.starts_with("https://") {
+    let parsed = url::Url::parse(url).ok()?;
+    if parsed.scheme() != "https" {
         return None;
     }
-    let rest = url.strip_prefix("https://")?;
-    let host = rest.split('/').next()?.split(':').next()?;
-    let parts: Vec<&str> = host.split('.').collect();
-    if parts.len() < 2 {
+    let host = parsed.host_str()?;
+
+    // Reject bare IP addresses.
+    if host.parse::<std::net::IpAddr>().is_ok() {
         return None;
     }
-    Some(format!("{}.{}", parts[parts.len() - 2], parts[parts.len() - 1]))
+
+    // `psl::domain_str` returns the registered domain (eTLD+1) using the
+    // embedded Mozilla public suffix list, or None for public suffixes
+    // themselves and single-label hosts.
+    psl::domain_str(host).map(str::to_owned)
 }
 
 fn credential_matches_origin(cred: &Credential, origin: &str) -> bool {
@@ -291,10 +305,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn etld1_https_extracts_last_two_labels() {
+    fn etld1_extracts_registered_domain() {
         assert_eq!(extract_etld1("https://app.github.com"), Some("github.com".to_string()));
         assert_eq!(extract_etld1("https://github.com"), Some("github.com".to_string()));
         assert_eq!(extract_etld1("https://a.b.c.example.com"), Some("example.com".to_string()));
+    }
+
+    #[test]
+    fn etld1_handles_multipart_public_suffix() {
+        // co.uk is a public suffix; bank.co.uk is the registered domain.
+        // The old naive approach would return "co.uk" for both bank.co.uk and
+        // evil.co.uk, allowing cross-site credential leakage.
+        assert_eq!(extract_etld1("https://bank.co.uk"), Some("bank.co.uk".to_string()));
+        assert_eq!(extract_etld1("https://www.bank.co.uk"), Some("bank.co.uk".to_string()));
+        // A bare public suffix has no registered domain.
+        assert_eq!(extract_etld1("https://co.uk"), None);
     }
 
     #[test]
