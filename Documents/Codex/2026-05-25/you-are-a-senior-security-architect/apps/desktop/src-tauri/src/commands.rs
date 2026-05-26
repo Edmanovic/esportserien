@@ -761,6 +761,51 @@ pub fn get_sync_status(state: tauri::State<'_, AppState>) -> crate::state::SyncS
     crate::sync::get_status(&state)
 }
 
+// ---------------------------------------------------------------------------
+// IPC / Tray commands
+// ---------------------------------------------------------------------------
+
+/// Sets the auto-lock timeout.  `None` = never lock automatically.
+#[tauri::command]
+pub fn set_autolock_timeout(minutes: Option<u32>, state: State<AppState>) -> Result<(), String> {
+    *state.autolock_minutes.lock().map_err(|e| e.to_string())? = minutes;
+    Ok(())
+}
+
+/// Returns the current lock status, auto-lock setting, and IPC port.
+#[derive(serde::Serialize)]
+pub struct LockStatus {
+    pub unlocked: bool,
+    pub autolock_minutes: Option<u32>,
+    pub ipc_port: Option<u16>,
+}
+
+#[tauri::command]
+pub fn get_lock_status(state: State<AppState>) -> Result<LockStatus, String> {
+    let unlocked = state.secrets.lock().map_err(|e| e.to_string())?.is_unlocked();
+    let autolock_minutes = *state.autolock_minutes.lock().map_err(|e| e.to_string())?;
+    let ipc_port = *state.ipc_port.lock().map_err(|e| e.to_string())?;
+    Ok(LockStatus { unlocked, autolock_minutes, ipc_port })
+}
+
+#[cfg(test)]
+mod lock_cmd_tests {
+    use super::*;
+
+    #[test]
+    fn lock_status_default_values() {
+        let state = crate::AppState::new(std::path::PathBuf::from("test-lock-cmd"));
+        let status = LockStatus {
+            unlocked: state.secrets.lock().unwrap().is_unlocked(),
+            autolock_minutes: *state.autolock_minutes.lock().unwrap(),
+            ipc_port: *state.ipc_port.lock().unwrap(),
+        };
+        assert!(!status.unlocked);
+        assert_eq!(status.autolock_minutes, Some(15));
+        assert_eq!(status.ipc_port, None);
+    }
+}
+
 #[cfg(test)]
 mod import_tests {
     use super::*;
