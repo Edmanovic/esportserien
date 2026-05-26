@@ -4,25 +4,22 @@
   "version": "0.1.0",
   "description": "Zero-knowledge enterprise password manager extension.",
   "permissions": ["activeTab", "scripting", "nativeMessaging"],
-  "optional_host_permissions": ["https://*/*"],
   "background": {
-    "service_worker": "src/background/service-worker.js",
+    "service_worker": "dist/background.js",
     "type": "module"
   },
   "content_scripts": [
     {
       "matches": ["https://*/*"],
-      "js": ["src/content/autofill-guard.js"],
+      "js": ["dist/content.js"],
       "run_at": "document_idle"
     }
   ],
   "action": {
-    "default_popup": "src/popup/popup.html",
+    "default_popup": "dist/popup.html",
     "default_title": "ESPASS"
   },
   "content_security_policy": {
     "extension_pages": "default-src 'self'; script-src 'self'; style-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
-  },
-  "host_permissions": []
+  }
 }
-
