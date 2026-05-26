@@ -25,10 +25,11 @@ function renderLocked(root: HTMLElement): void {
 
     btn.disabled = true;
     btn.textContent = "Låser op...";
+    pwInput.value = ""; // clear immediately before async send
 
     const response = await chrome.runtime.sendMessage({ type: "unlock", password }) as Record<string, unknown> | undefined;
 
-    if (response?.type === "ok" || response?.vault_state === "unlocked") {
+    if (response?.type === "unlock_result" && response?.ok === true) {
       await main();
     } else {
       errorDiv.textContent = "Forkert adgangskode";
@@ -60,18 +61,20 @@ function renderReady(root: HTMLElement, autolockMinutes: number | null): void {
 
 async function main(): Promise<void> {
   const root = document.getElementById("root") as HTMLElement;
-  const response = await chrome.runtime.sendMessage({ type: "get_vault_status" }) as Record<string, unknown> | undefined;
-
-  switch (response?.state) {
-    case "ready":
-      renderReady(root, (response.autolock_minutes as number | null | undefined) ?? null);
-      break;
-    case "locked":
-      renderLocked(root);
-      break;
-    default:
-      renderUnavailable(root);
-      break;
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "get_vault_status" }) as Record<string, unknown>;
+    switch (response?.state) {
+      case "ready":
+        renderReady(root, (response.autolock_minutes as number | null) ?? null);
+        break;
+      case "locked":
+        renderLocked(root);
+        break;
+      default:
+        renderUnavailable(root);
+    }
+  } catch {
+    renderUnavailable(root);
   }
 }
 

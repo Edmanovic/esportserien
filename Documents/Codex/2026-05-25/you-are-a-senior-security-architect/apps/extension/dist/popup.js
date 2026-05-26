@@ -21,8 +21,9 @@ function renderLocked(root) {
     }
     btn.disabled = true;
     btn.textContent = "L\xE5ser op...";
+    pwInput.value = "";
     const response = await chrome.runtime.sendMessage({ type: "unlock", password });
-    if (response?.type === "ok" || response?.vault_state === "unlocked") {
+    if (response?.type === "unlock_result" && response?.ok === true) {
       await main();
     } else {
       errorDiv.textContent = "Forkert adgangskode";
@@ -47,17 +48,20 @@ function renderReady(root, autolockMinutes) {
 }
 async function main() {
   const root = document.getElementById("root");
-  const response = await chrome.runtime.sendMessage({ type: "get_vault_status" });
-  switch (response?.state) {
-    case "ready":
-      renderReady(root, response.autolock_minutes ?? null);
-      break;
-    case "locked":
-      renderLocked(root);
-      break;
-    default:
-      renderUnavailable(root);
-      break;
+  try {
+    const response = await chrome.runtime.sendMessage({ type: "get_vault_status" });
+    switch (response?.state) {
+      case "ready":
+        renderReady(root, response.autolock_minutes ?? null);
+        break;
+      case "locked":
+        renderLocked(root);
+        break;
+      default:
+        renderUnavailable(root);
+    }
+  } catch {
+    renderUnavailable(root);
   }
 }
 main();
