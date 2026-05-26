@@ -4,6 +4,7 @@ mod commands;
 mod ipc_server;
 mod state;
 mod sync;
+mod tray;
 
 pub use state::AppState;
 
