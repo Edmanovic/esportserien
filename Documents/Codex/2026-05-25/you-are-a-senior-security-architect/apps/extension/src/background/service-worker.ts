@@ -186,10 +186,9 @@ chrome.runtime.onMessage.addListener(
         return true;
       }
       case "lock": {
-        sendToNativeHost({ type: "lock" }).then((raw) => {
-          credentialCache.clear();
-          sendResponse(raw);
-        });
+        // Clear cache immediately (fail-closed) before the round-trip completes.
+        credentialCache.clear();
+        sendToNativeHost({ type: "lock" }).then(sendResponse);
         return true;
       }
       default:
