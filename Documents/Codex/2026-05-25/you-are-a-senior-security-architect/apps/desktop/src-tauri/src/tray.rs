@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn should_autolock_when_threshold_exceeded() {
-        assert!(should_lock(100, 1000, 900));
+        assert!(should_lock(0, 1000, 900));  // 1000 - 0 = 1000 > 900 — clearly exceeded
     }
 
     #[test]
@@ -140,6 +140,6 @@ mod tests {
 
     #[test]
     fn exact_boundary_triggers_lock() {
-        assert!(should_lock(100, 1000, 900));  // 1000 - 100 = 900 >= 900
+        assert!(should_lock(100, 1000, 900));  // 1000 - 100 = 900 == 900 — exact boundary, should lock (>=)
     }
 }
