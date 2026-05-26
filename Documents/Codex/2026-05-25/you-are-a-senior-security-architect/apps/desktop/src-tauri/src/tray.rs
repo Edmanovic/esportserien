@@ -69,7 +69,7 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
             if let Ok(mut s) = state.session.lock() { *s = None; }
             let _ = state.lock_notify_tx.send(());
         }
-        "quit" => std::process::exit(0),
+        "quit" => app.exit(0),
         al if al.starts_with("al_") => {
             let minutes: Option<u32> = match al {
                 "al_1"    => Some(1),
