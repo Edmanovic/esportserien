@@ -2,6 +2,7 @@
 
 mod commands;
 mod state;
+mod sync;
 
 pub use state::AppState;
 
