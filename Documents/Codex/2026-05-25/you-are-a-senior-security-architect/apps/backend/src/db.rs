@@ -18,17 +18,32 @@ fn create_schema(conn: &Connection) -> SqlResult<()> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS vault_items (
-            vault_id    TEXT NOT NULL,
-            item_id     TEXT NOT NULL,
+            vault_id     TEXT NOT NULL,
+            item_id      TEXT NOT NULL,
             payload_json TEXT NOT NULL,
-            stored_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+            stored_at    INTEGER NOT NULL DEFAULT (unixepoch()),
             PRIMARY KEY (vault_id, item_id)
         );
 
         CREATE TABLE IF NOT EXISTS devices (
-            device_id   TEXT PRIMARY KEY,
+            device_id     TEXT PRIMARY KEY,
             identity_json TEXT NOT NULL,
             registered_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+
+        CREATE TABLE IF NOT EXISTS users (
+            id         TEXT PRIMARY KEY,
+            email      TEXT UNIQUE NOT NULL,
+            auth_hash  TEXT NOT NULL,
+            vault_id   TEXT NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch())
+        );
+
+        CREATE TABLE IF NOT EXISTS refresh_tokens (
+            token      TEXT PRIMARY KEY,
+            user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            expires_at INTEGER NOT NULL,
+            created_at INTEGER NOT NULL DEFAULT (unixepoch())
         );
     ",
     )
@@ -91,4 +106,91 @@ pub fn load_device(conn: &Connection, device_id: &str) -> SqlResult<Option<Strin
     } else {
         Ok(None)
     }
+}
+
+/// Row returned from the users table.
+pub struct UserRow {
+    pub id: String,
+    pub email: String,
+    pub auth_hash: String,
+    pub vault_id: String,
+}
+
+/// Creates a new user. Returns `Err` if the email is already taken.
+pub fn create_user(
+    conn: &Connection,
+    id: &str,
+    email: &str,
+    auth_hash: &str,
+    vault_id: &str,
+) -> SqlResult<()> {
+    conn.execute(
+        "INSERT INTO users (id, email, auth_hash, vault_id) VALUES (?1, ?2, ?3, ?4)",
+        params![id, email, auth_hash, vault_id],
+    )?;
+    Ok(())
+}
+
+/// Loads a user by email. Returns `None` if not found.
+pub fn load_user_by_email(conn: &Connection, email: &str) -> SqlResult<Option<UserRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, email, auth_hash, vault_id FROM users WHERE email = ?1",
+    )?;
+    let mut rows = stmt.query(params![email])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(UserRow {
+            id: row.get(0)?,
+            email: row.get(1)?,
+            auth_hash: row.get(2)?,
+            vault_id: row.get(3)?,
+        }))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Stores a refresh token. `expires_at` is a Unix timestamp.
+pub fn store_refresh_token(
+    conn: &Connection,
+    token: &str,
+    user_id: &str,
+    expires_at: i64,
+) -> SqlResult<()> {
+    conn.execute(
+        "INSERT INTO refresh_tokens (token, user_id, expires_at) VALUES (?1, ?2, ?3)",
+        params![token, user_id, expires_at],
+    )?;
+    Ok(())
+}
+
+/// Validates a refresh token and returns the associated user_id.
+/// Returns `None` if the token doesn't exist or is expired.
+pub fn validate_refresh_token(
+    conn: &Connection,
+    token: &str,
+    now: i64,
+) -> SqlResult<Option<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT user_id FROM refresh_tokens WHERE token = ?1 AND expires_at > ?2",
+    )?;
+    let mut rows = stmt.query(params![token, now])?;
+    if let Some(row) = rows.next()? {
+        Ok(Some(row.get(0)?))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Deletes a refresh token (used on refresh to rotate it).
+pub fn delete_refresh_token(conn: &Connection, token: &str) -> SqlResult<()> {
+    conn.execute("DELETE FROM refresh_tokens WHERE token = ?1", params![token])?;
+    Ok(())
+}
+
+/// Loads all item payloads for a vault (for the list metadata endpoint).
+pub fn load_items_for_vault(conn: &Connection, vault_id: &str) -> SqlResult<Vec<String>> {
+    let mut stmt =
+        conn.prepare("SELECT payload_json FROM vault_items WHERE vault_id = ?1")?;
+    let rows = stmt.query_map(params![vault_id], |row| row.get(0))?;
+    rows.collect()
 }
