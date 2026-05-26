@@ -88,9 +88,9 @@ async fn main() -> Result<(), std::io::Error> {
     let state = AppState::default();
     let app = Router::new()
         .route("/healthz", get(healthz))
-        .route("/v1/auth/register", post(auth::register))
-        .route("/v1/auth/login", post(auth::login))
-        .route("/v1/auth/refresh", post(auth::refresh_token))
+        .route("/v1/auth/register", post(handle_register))
+        .route("/v1/auth/login", post(handle_login))
+        .route("/v1/auth/refresh", post(handle_refresh))
         .route("/v1/devices", put(register_device))
         .route(
             "/v1/sessions/:device_id/replay/:counter",
@@ -112,6 +112,30 @@ async fn main() -> Result<(), std::io::Error> {
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn handle_register(
+    State(state): State<AppState>,
+    Json(req): Json<auth::RegisterRequest>,
+) -> Result<Json<auth::RegisterResponse>, StatusCode> {
+    enforce_local_rate_limit(&state)?;
+    auth::register(State(state), Json(req)).await
+}
+
+async fn handle_login(
+    State(state): State<AppState>,
+    Json(req): Json<auth::LoginRequest>,
+) -> Result<Json<auth::LoginResponse>, StatusCode> {
+    enforce_local_rate_limit(&state)?;
+    auth::login(State(state), Json(req)).await
+}
+
+async fn handle_refresh(
+    State(state): State<AppState>,
+    Json(req): Json<auth::RefreshRequest>,
+) -> Result<Json<auth::LoginResponse>, StatusCode> {
+    enforce_local_rate_limit(&state)?;
+    auth::refresh_token(State(state), Json(req)).await
 }
 
 async fn register_device(

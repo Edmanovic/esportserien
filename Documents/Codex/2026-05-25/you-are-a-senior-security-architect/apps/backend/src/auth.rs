@@ -25,8 +25,13 @@ pub struct Claims {
 }
 
 fn jwt_secret() -> String {
-    std::env::var("ESPASS_JWT_SECRET")
-        .unwrap_or_else(|_| "dev-secret-change-in-production".to_string())
+    let secret = std::env::var("ESPASS_JWT_SECRET")
+        .unwrap_or_else(|_| "dev-secret-change-in-production".to_string());
+    #[cfg(not(debug_assertions))]
+    if secret.len() < 32 {
+        panic!("ESPASS_JWT_SECRET must be at least 32 characters in production builds");
+    }
+    secret
 }
 
 pub fn sign_jwt(user_id: &str, vault_id: &str) -> Result<String, StatusCode> {
@@ -59,6 +64,13 @@ fn new_refresh_token() -> String {
     use rand::Rng;
     let bytes: [u8; 32] = rand::thread_rng().gen();
     hex::encode(bytes)
+}
+
+fn hash_refresh_token(token: &str) -> String {
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 // ── Request / response types ─────────────────────────────────────────────────
@@ -146,7 +158,7 @@ pub async fn login(
 
     {
         let db = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        db::store_refresh_token(&db, &refresh_token, &user_id, expires_at)
+        db::store_refresh_token(&db, &hash_refresh_token(&refresh_token), &user_id, expires_at)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
@@ -159,28 +171,30 @@ pub async fn refresh_token(
 ) -> Result<Json<LoginResponse>, StatusCode> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
 
-    let user_id = {
+    let (user_id, vault_id) = {
         let db = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let uid = db::validate_refresh_token(&db, &req.refresh_token, now)
+
+        // Validate old token
+        let uid = db::validate_refresh_token(&db, &hash_refresh_token(&req.refresh_token), now)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .ok_or(StatusCode::UNAUTHORIZED)?;
-        db::delete_refresh_token(&db, &req.refresh_token)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        uid
-    };
 
-    // Load vault_id for the user
-    let vault_id = {
-        let db = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        // Delete old token
+        db::delete_refresh_token(&db, &hash_refresh_token(&req.refresh_token))
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        // Get vault_id for the user
         let mut stmt = db.prepare("SELECT vault_id FROM users WHERE id = ?1")
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let mut rows = stmt.query(rusqlite::params![user_id])
+        let mut rows = stmt.query(rusqlite::params![uid])
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        rows.next()
+        let vid = rows.next()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .ok_or(StatusCode::UNAUTHORIZED)?
             .get::<_, String>(0)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+        (uid, vid)
     };
 
     let jwt = sign_jwt(&user_id, &vault_id)?;
@@ -189,7 +203,7 @@ pub async fn refresh_token(
 
     {
         let db = state.db.lock().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        db::store_refresh_token(&db, &new_token, &user_id, expires_at)
+        db::store_refresh_token(&db, &hash_refresh_token(&new_token), &user_id, expires_at)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
 
