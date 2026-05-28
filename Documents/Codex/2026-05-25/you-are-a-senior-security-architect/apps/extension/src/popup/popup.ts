@@ -1,6 +1,9 @@
 function renderUnavailable(root: HTMLElement): void {
-  root.innerHTML =
-    "<p>ESPASS kører ikke. Start ESPASS-appen for at fortsætte.</p>";
+  root.innerHTML = `
+    <p>ESPASS kører ikke. Start ESPASS-appen for at fortsætte.</p>
+    <button id="retry-btn">Prøv igen</button>
+  `;
+  document.getElementById("retry-btn")?.addEventListener("click", () => main());
 }
 
 function renderLocked(root: HTMLElement): void {

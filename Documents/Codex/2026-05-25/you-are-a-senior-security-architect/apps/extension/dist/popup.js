@@ -1,6 +1,10 @@
 // apps/extension/src/popup/popup.ts
 function renderUnavailable(root) {
-  root.innerHTML = "<p>ESPASS k\xF8rer ikke. Start ESPASS-appen for at forts\xE6tte.</p>";
+  root.innerHTML = `
+    <p>ESPASS k\xF8rer ikke. Start ESPASS-appen for at forts\xE6tte.</p>
+    <button id="retry-btn">Pr\xF8v igen</button>
+  `;
+  document.getElementById("retry-btn")?.addEventListener("click", () => main());
 }
 function renderLocked(root) {
   root.innerHTML = `
