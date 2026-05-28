@@ -74,7 +74,7 @@ function credItemHTML(cred: CredentialItem, suggested = false): string {
 
   return `<div class="cred-item${suggested ? ' cred-item--suggested' : ''}"
                data-id="${esc(cred.id)}" tabindex="0">
-    <div class="cred-avatar" style="background:${color}">${esc(letter)}</div>
+    <div class="cred-avatar" data-avatar-color="${esc(color)}">${esc(letter)}</div>
     <div class="cred-body">
       <div class="cred-title">${esc(cred.title)}</div>
       <div class="cred-username">${esc(cred.username)}${domain ? `<span class="cred-domain"> · ${esc(domain)}</span>` : ''}</div>
@@ -134,6 +134,14 @@ function attachCopyActions(container: Element): void {
         }
       }
     });
+  });
+}
+
+// ── Avatar color application (CSP-safe: DOM property, not style attribute) ──
+
+function applyAvatarColors(container: Element): void {
+  container.querySelectorAll<HTMLElement>('[data-avatar-color]').forEach((el) => {
+    el.style.background = el.dataset.avatarColor ?? '';
   });
 }
 
@@ -279,6 +287,7 @@ async function renderUnlocked(root: HTMLElement, tabOrigin: string | null): Prom
 
   // Attach copy actions to initially rendered items
   attachCopyActions(root);
+  applyAvatarColors(root);
 
   // Search filter
   const searchEl  = document.getElementById('cred-search') as HTMLInputElement;
@@ -301,6 +310,7 @@ async function renderUnlocked(root: HTMLElement, tabOrigin: string | null): Prom
         : filtered.map(c => credItemHTML(c)).join('');
     }
     attachCopyActions(credList);
+    applyAvatarColors(credList);
   });
 }
 

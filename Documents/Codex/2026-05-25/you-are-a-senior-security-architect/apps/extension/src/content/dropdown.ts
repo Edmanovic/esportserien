@@ -152,7 +152,7 @@ export function showDropdown(
     const color  = _avatarColor(item.title);
     const letter = _avatarLetter(item.title);
     el.innerHTML =
-      `<div class="avatar" style="background:${color}">${esc(letter)}</div>` +
+      `<div class="avatar" data-avatar-color="${color}">${esc(letter)}</div>` +
       `<div style="display:flex;flex-direction:column;flex:1;min-width:0;">` +
         `<span class="item-title">${esc(item.title)}</span>` +
         `<span class="item-user">${esc(item.username)}</span>` +
@@ -160,6 +160,9 @@ export function showDropdown(
     el.addEventListener("click", () => { dismissDropdown(); onSelect(item.id); });
     el.addEventListener("mouseenter", () => setActive(i));
     itemList.appendChild(el);
+    // Set background via DOM property (CSP-safe: not a style attribute)
+    const avatarEl = el.querySelector<HTMLElement>('.avatar');
+    if (avatarEl) avatarEl.style.background = color;
     els.push(el);
   });
 
