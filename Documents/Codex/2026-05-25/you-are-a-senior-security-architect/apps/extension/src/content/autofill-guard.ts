@@ -10,7 +10,7 @@
  */
 
 import { detectFullscreenOverlay, checkOverlay } from "./overlay-guard";
-import { showDropdown, dismissDropdown, type CredentialItem } from "./dropdown";
+import { showDropdown, dismissDropdown, isDropdownVisible, type CredentialItem } from "./dropdown";
 
 // ---------------------------------------------------------------------------
 // Signal helpers (unchanged from original)
@@ -126,13 +126,9 @@ function sendToBg(
 // Trigger handler — fires on focusin (covers click, tab, programmatic focus)
 // ---------------------------------------------------------------------------
 
-// Debounce: skip if we just showed a dropdown for this exact element
-let lastTriggeredField: HTMLInputElement | null = null;
-
 async function handleLoginFieldActivation(target: HTMLInputElement, clientX = 0, clientY = 0): Promise<void> {
   if (!isLoginField(target)) return;
-  if (target === lastTriggeredField) return; // already showing for this field
-  lastTriggeredField = target;
+  if (isDropdownVisible()) return; // dropdown already showing — don't replace it
 
   // Security guards
   if (detectFullscreenOverlay()) return;
@@ -179,14 +175,10 @@ document.addEventListener(
   async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
-    lastTriggeredField = null; // allow re-trigger on explicit click
     await handleLoginFieldActivation(target, event.clientX, event.clientY);
   },
   { capture: true }
 );
-
-// Reset when dropdown is dismissed (blur clears the last-triggered cache)
-document.addEventListener("focusout", () => { lastTriggeredField = null; }, { capture: true });
 
 // ---------------------------------------------------------------------------
 // Field filling

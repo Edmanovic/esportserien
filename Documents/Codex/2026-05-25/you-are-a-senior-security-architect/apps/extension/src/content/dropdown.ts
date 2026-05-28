@@ -14,6 +14,10 @@ export interface CredentialItem {
 let currentHost: HTMLElement | null = null;
 let cleanupFns: Array<() => void> = [];
 
+export function isDropdownVisible(): boolean {
+  return currentHost !== null;
+}
+
 export function dismissDropdown(): void {
   for (const fn of cleanupFns) fn();
   cleanupFns = [];
