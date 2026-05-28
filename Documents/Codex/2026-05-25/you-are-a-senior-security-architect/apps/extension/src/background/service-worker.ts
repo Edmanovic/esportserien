@@ -178,6 +178,11 @@ chrome.runtime.onMessage.addListener(
   ) => {
     if (!message || typeof message.type !== "string") return false;
 
+    // Reject messages from content scripts (running inside web pages).
+    // Extension pages (popup, options) have sender.tab === undefined.
+    // Credential-access handlers must not be reachable from page context.
+    const fromExtensionPage = _sender.tab === undefined;
+
     switch (message.type) {
       case "get_vault_status": {
         resolveVaultStatus().then(sendResponse);
@@ -197,6 +202,7 @@ chrome.runtime.onMessage.addListener(
         return true;
       }
       case "list_credentials": {
+        if (!fromExtensionPage) { sendResponse({ type: "error", code: "forbidden" }); return true; }
         if (credentialListCache) {
           sendResponse({ type: "credentials_list", items: credentialListCache });
         } else {
@@ -210,7 +216,9 @@ chrome.runtime.onMessage.addListener(
         return true;
       }
       case "find_credentials": {
-        const origin = message.origin as string;
+        if (!fromExtensionPage) { sendResponse({ type: "error", code: "forbidden" }); return true; }
+        if (typeof message.origin !== "string") { sendResponse({ type: "error", code: "bad-request" }); return true; }
+        const origin = message.origin;
         const cached = credentialCache.get(origin);
         if (cached) {
           sendResponse({ type: "credentials", items: cached });
@@ -225,7 +233,9 @@ chrome.runtime.onMessage.addListener(
         return true;
       }
       case "get_credential": {
-        sendToNativeHost({ type: "get_credential", id: message.id as string })
+        if (!fromExtensionPage) { sendResponse({ type: "error", code: "forbidden" }); return true; }
+        if (typeof message.id !== "string") { sendResponse({ type: "error", code: "bad-request" }); return true; }
+        sendToNativeHost({ type: "get_credential", id: message.id })
           .then(sendResponse);
         return true;
       }
