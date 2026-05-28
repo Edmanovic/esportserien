@@ -28,7 +28,8 @@ function esc(s: unknown): string {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
 }
 
 // ── Toast ──────────────────────────────────────────────────────────────────
@@ -54,8 +55,9 @@ async function copyText(text: string): Promise<void> {
     document.body.appendChild(ta);
     ta.focus();
     ta.select();
-    document.execCommand('copy');
+    const ok = document.execCommand('copy');
     ta.remove();
+    if (!ok) throw new Error('execCommand copy failed');
   }
 }
 
@@ -204,12 +206,25 @@ function renderLocked(root: HTMLElement): void {
 // ── Render: unlocked ───────────────────────────────────────────────────────
 
 async function renderUnlocked(root: HTMLElement, tabOrigin: string | null): Promise<void> {
-  const [tabResp, allResp] = await Promise.all([
-    tabOrigin
-      ? chrome.runtime.sendMessage({ type: 'find_credentials', origin: tabOrigin }) as Promise<Record<string, unknown>>
-      : Promise.resolve({ type: 'credentials', items: [] as CredentialItem[] }),
-    chrome.runtime.sendMessage({ type: 'list_credentials' }) as Promise<Record<string, unknown>>,
-  ]);
+  let tabResp: Record<string, unknown>;
+  let allResp: Record<string, unknown>;
+  try {
+    [tabResp, allResp] = await Promise.all([
+      tabOrigin
+        ? chrome.runtime.sendMessage({ type: 'find_credentials', origin: tabOrigin }) as Promise<Record<string, unknown>>
+        : Promise.resolve({ type: 'credentials', items: [] as CredentialItem[] }),
+      chrome.runtime.sendMessage({ type: 'list_credentials' }) as Promise<Record<string, unknown>>,
+    ]);
+  } catch {
+    root.innerHTML = `
+      <div class="screen screen--center">
+        <div class="screen-heading">Could not load credentials</div>
+        <div class="screen-sub">The ESPASS app may have restarted.</div>
+        <button class="btn btn--primary" id="retry-btn">Retry</button>
+      </div>`;
+    document.getElementById('retry-btn')!.addEventListener('click', () => main());
+    return;
+  }
 
   const tabMatches = (tabResp?.type === 'credentials'      ? tabResp.items  : []) as CredentialItem[];
   const allCreds   = (allResp?.type === 'credentials_list' ? allResp.items  : []) as CredentialItem[];
