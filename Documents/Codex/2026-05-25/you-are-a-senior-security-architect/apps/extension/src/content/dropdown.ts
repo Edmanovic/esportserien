@@ -152,7 +152,7 @@ export function showDropdown(
     const color  = _avatarColor(item.title);
     const letter = _avatarLetter(item.title);
     el.innerHTML =
-      `<div class="avatar" style="background:${color}">${letter}</div>` +
+      `<div class="avatar" style="background:${color}">${esc(letter)}</div>` +
       `<div style="display:flex;flex-direction:column;flex:1;min-width:0;">` +
         `<span class="item-title">${esc(item.title)}</span>` +
         `<span class="item-user">${esc(item.username)}</span>` +
