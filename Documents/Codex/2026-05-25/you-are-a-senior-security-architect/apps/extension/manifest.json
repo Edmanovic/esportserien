@@ -3,7 +3,7 @@
   "name": "ESPASS",
   "version": "0.1.0",
   "description": "Zero-knowledge enterprise password manager extension.",
-  "permissions": ["activeTab", "scripting", "nativeMessaging"],
+  "permissions": ["activeTab", "scripting", "nativeMessaging", "tabs"],
   "background": {
     "service_worker": "dist/background.js",
     "type": "module"

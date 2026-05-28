@@ -14,6 +14,7 @@ interface Credential {
   id: string;
   title: string;
   username: string;
+  url?: string | null;
 }
 
 interface PendingRequest {
@@ -28,6 +29,7 @@ interface PendingRequest {
 let nativePort: chrome.runtime.Port | null = null;
 const pendingRequests = new Map<string, PendingRequest>();
 const credentialCache = new Map<string, Credential[]>(); // origin → items
+let credentialListCache: Credential[] | null = null;
 
 function getOrConnectNativeHost(): chrome.runtime.Port {
   if (nativePort) return nativePort;
@@ -36,6 +38,8 @@ function getOrConnectNativeHost(): chrome.runtime.Port {
   nativePort.onMessage.addListener(handleNativeMessage);
   nativePort.onDisconnect.addListener(() => {
     nativePort = null;
+    credentialCache.clear();
+    credentialListCache = null;
     for (const [id, pending] of pendingRequests) {
       clearTimeout(pending.timeoutId);
       pending.resolve({ type: "error", code: "native-host-disconnected" });
@@ -70,6 +74,7 @@ function handleNativeMessage(msg: unknown): void {
 
   if (m.type === "vault_locked") {
     credentialCache.clear();
+    credentialListCache = null;
     broadcastToContentPorts({ type: "vault_locked" });
     return;
   }
@@ -186,9 +191,42 @@ chrome.runtime.onMessage.addListener(
         return true;
       }
       case "lock": {
-        // Clear cache immediately (fail-closed) before the round-trip completes.
         credentialCache.clear();
+        credentialListCache = null;
         sendToNativeHost({ type: "lock" }).then(sendResponse);
+        return true;
+      }
+      case "list_credentials": {
+        if (credentialListCache) {
+          sendResponse({ type: "credentials_list", items: credentialListCache });
+        } else {
+          sendToNativeHost({ type: "list_credentials" }).then((raw) => {
+            if (raw.type === "credentials_list") {
+              credentialListCache = raw.items as Credential[];
+            }
+            sendResponse(raw);
+          });
+        }
+        return true;
+      }
+      case "find_credentials": {
+        const origin = message.origin as string;
+        const cached = credentialCache.get(origin);
+        if (cached) {
+          sendResponse({ type: "credentials", items: cached });
+        } else {
+          sendToNativeHost({ type: "find_credentials", origin }).then((raw) => {
+            if (raw.type === "credentials") {
+              credentialCache.set(origin, raw.items as Credential[]);
+            }
+            sendResponse(raw);
+          });
+        }
+        return true;
+      }
+      case "get_credential": {
+        sendToNativeHost({ type: "get_credential", id: message.id as string })
+          .then(sendResponse);
         return true;
       }
       default:
