@@ -17,7 +17,14 @@ export interface OverlayCheckResult {
  * by a suspicious element.
  *
  * Uses `document.elementFromPoint` to find the topmost element at the
- * coordinates and validates that it belongs to the expected container.
+ * coordinates and validates that it is related to the expected input:
+ *   - the input itself
+ *   - a child of the input (e.g. shadow content — impossible for void elements, future-proofing)
+ *   - an ancestor of the input (form wrapper, label container, Knockout decorator div…)
+ *   - a non-interactive element (pointer-events:none) that cannot intercept user input
+ *
+ * A genuine overlay would be a *sibling* element — unrelated to the input's
+ * ancestor chain — which would fail all of the above checks.
  */
 export function checkOverlay(
   x: number,
@@ -28,13 +35,21 @@ export function checkOverlay(
   if (!top) {
     return { safe: false, reason: 'no-element-at-point' };
   }
-  if (!expectedContainer.contains(top) && top !== expectedContainer) {
-    return {
-      safe: false,
-      reason: `overlay-detected:${top.tagName.toLowerCase()}`,
-    };
+  // Non-interactive elements cannot intercept clicks or our dropdown.
+  if (window.getComputedStyle(top).pointerEvents === 'none') {
+    return { safe: true };
   }
-  return { safe: true };
+  if (
+    top === expectedContainer ||           // exact match
+    expectedContainer.contains(top) ||    // top is a child of input (future-proofing)
+    top.contains(expectedContainer)        // top is an ancestor (form, wrapper div, label…)
+  ) {
+    return { safe: true };
+  }
+  return {
+    safe: false,
+    reason: `overlay-detected:${top.tagName.toLowerCase()}`,
+  };
 }
 
 /**
