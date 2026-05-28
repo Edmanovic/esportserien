@@ -131,7 +131,7 @@ async function handleLoginFieldActivation(target: HTMLInputElement, clientX = 0,
   if (isDropdownVisible()) return; // dropdown already showing — don't replace it
 
   // Security guards
-  if (detectFullscreenOverlay()) return;
+  if (detectFullscreenOverlay(target)) return;
   if (clientX || clientY) {
     const overlayResult = checkOverlay(clientX, clientY, target);
     if (!overlayResult.safe) return;

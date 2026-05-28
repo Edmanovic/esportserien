@@ -38,12 +38,19 @@ export function checkOverlay(
 }
 
 /**
- * Returns true if a fixed-position element covering the viewport is detected.
+ * Returns true if a fixed-position element covering the viewport is detected
+ * and is not part of a legitimate modal login form.
  *
- * Scans visible fixed-position elements and flags those that cover more than
- * 80% of the viewport (a heuristic for clickjacking overlays).
+ * Scans visible fixed-position elements and flags those that:
+ *   1. Cover more than 80% of the viewport, AND
+ *   2. Do NOT contain the target input (i.e. are not a modal wrapping the form), AND
+ *   3. Are actually the topmost layer at their own center point (i.e. are not
+ *      a backdrop sitting behind a dialog — those are harmless).
+ *
+ * Passing `inputEl` prevents false positives on sites that show login forms
+ * inside fixed-position modal dialogs with full-viewport backdrops.
  */
-export function detectFullscreenOverlay(): boolean {
+export function detectFullscreenOverlay(inputEl?: Element): boolean {
   const viewportArea = window.innerWidth * window.innerHeight;
   if (viewportArea === 0) return false;
 
@@ -53,8 +60,19 @@ export function detectFullscreenOverlay(): boolean {
   });
 
   return fixed.some((el) => {
+    // A large fixed element that wraps the input is a legitimate modal container.
+    if (inputEl && el.contains(inputEl)) return false;
+
     const rect = el.getBoundingClientRect();
     const area = rect.width * rect.height;
-    return area / viewportArea > 0.8;
+    if (area / viewportArea <= 0.8) return false;
+
+    // Only flag the element if it is actually the topmost layer at its own centre.
+    // Modal backdrops (z-index behind the dialog) fail this check because
+    // elementFromPoint returns the dialog on top of them — not the backdrop itself.
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const topEl = document.elementFromPoint(cx, cy);
+    return topEl !== null && (el === topEl || el.contains(topEl));
   });
 }
