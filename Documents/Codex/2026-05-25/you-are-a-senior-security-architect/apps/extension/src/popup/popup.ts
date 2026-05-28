@@ -114,8 +114,12 @@ function attachCopyActions(container: Element): void {
       const id     = fresh.dataset.id!;
 
       if (action === 'copy-user') {
-        await copyText(fresh.dataset.value!);
-        showToast('Username copied');
+        try {
+          await copyText(fresh.dataset.value!);
+          showToast('Username copied');
+        } catch {
+          showToast('Failed to copy', 'error');
+        }
       } else {
         try {
           const resp = await chrome.runtime.sendMessage({ type: 'get_credential', id }) as Record<string, unknown>;
