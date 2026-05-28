@@ -80,6 +80,7 @@ export function showDropdown(
     }
     .item-title  { font-weight: 600; color: #101828; }
     .item-user   { font-size: 12px; color: #667085; margin-top: 1px; }
+    .item-text   { display: flex; flex-direction: column; flex: 1; min-width: 0; }
     .brand-strip {
       display: flex;
       justify-content: space-between;
@@ -153,7 +154,7 @@ export function showDropdown(
     const letter = _avatarLetter(item.title);
     el.innerHTML =
       `<div class="avatar" data-avatar-color="${color}">${esc(letter)}</div>` +
-      `<div style="display:flex;flex-direction:column;flex:1;min-width:0;">` +
+      `<div class="item-text">` +
         `<span class="item-title">${esc(item.title)}</span>` +
         `<span class="item-user">${esc(item.username)}</span>` +
       `</div>`;
