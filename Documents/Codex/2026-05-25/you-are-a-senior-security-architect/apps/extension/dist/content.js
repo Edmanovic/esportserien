@@ -148,6 +148,19 @@
     const ac = (input.getAttribute("autocomplete") ?? "").toLowerCase();
     return ac.includes("current-password") || ac.includes("new-password");
   }
+  function isUsernameField(input) {
+    if (input.type === "password") return false;
+    const ac = (input.getAttribute("autocomplete") ?? "").toLowerCase();
+    const name = (input.name ?? "").toLowerCase();
+    const id = (input.id ?? "").toLowerCase();
+    const looksLikeUsername = input.type === "email" || ac.includes("username") || ac.includes("email") || /user|email|login|account|mail/i.test(name + " " + id);
+    if (!looksLikeUsername) return false;
+    const scope = input.closest("form") ?? document.body;
+    return !!scope.querySelector('input[type="password"]');
+  }
+  function isLoginField(input) {
+    return isPasswordField(input) || isUsernameField(input);
+  }
   var bgPort = null;
   var pending = /* @__PURE__ */ new Map();
   function getBgPort() {
@@ -184,55 +197,78 @@
       getBgPort().postMessage(msg);
     });
   }
+  var lastTriggeredField = null;
+  async function handleLoginFieldActivation(target, clientX = 0, clientY = 0) {
+    if (!isLoginField(target)) return;
+    if (target === lastTriggeredField) return;
+    lastTriggeredField = target;
+    if (detectFullscreenOverlay()) return;
+    if (clientX || clientY) {
+      const overlayResult = checkOverlay(clientX, clientY, target);
+      if (!overlayResult.safe) return;
+    }
+    const origin = window.location.origin;
+    let topLevelOrigin = origin;
+    try {
+      topLevelOrigin = window.top?.location.origin ?? origin;
+    } catch {
+      topLevelOrigin = "cross-origin";
+    }
+    if (topLevelOrigin !== origin) return;
+    if (detectSuspiciousDomain(window.location.hostname)) return;
+    if (!isVisibleInput(target)) return;
+    const response = await sendToBg({ type: "find_credentials", origin });
+    if (response.type !== "credentials") return;
+    const items = response.items;
+    if (items.length === 0) return;
+    showDropdown(target, items, async (id) => {
+      const fillResponse = await sendToBg({ type: "fill_credential", id });
+      if (fillResponse.type === "fill_data") {
+        fillFields(target, fillResponse.username, fillResponse.password);
+      }
+    });
+  }
+  document.addEventListener(
+    "focusin",
+    async (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      await handleLoginFieldActivation(target);
+    },
+    { capture: true }
+  );
   document.addEventListener(
     "click",
     async (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement)) return;
-      if (!isPasswordField(target)) return;
-      if (detectFullscreenOverlay()) return;
-      const overlayResult = checkOverlay(event.clientX, event.clientY, target);
-      if (!overlayResult.safe) return;
-      const origin = window.location.origin;
-      let topLevelOrigin = origin;
-      try {
-        topLevelOrigin = window.top?.location.origin ?? origin;
-      } catch {
-        topLevelOrigin = "cross-origin";
-      }
-      if (topLevelOrigin !== origin) return;
-      if (detectSuspiciousDomain(window.location.hostname)) return;
-      if (!isVisibleInput(target)) return;
-      const response = await sendToBg({ type: "find_credentials", origin });
-      if (response.type !== "credentials") return;
-      const items = response.items;
-      if (items.length === 0) return;
-      showDropdown(target, items, async (id) => {
-        const fillResponse = await sendToBg({ type: "fill_credential", id });
-        if (fillResponse.type === "fill_data") {
-          fillFields(
-            target,
-            fillResponse.username,
-            fillResponse.password
-          );
-        }
-      });
+      lastTriggeredField = null;
+      await handleLoginFieldActivation(target, event.clientX, event.clientY);
     },
     { capture: true }
   );
-  function fillFields(passwordInput, username, password) {
-    const form = passwordInput.closest("form") ?? document.body;
-    const candidates = Array.from(
-      form.querySelectorAll(
-        'input[type="text"], input[type="email"], input:not([type])'
-      )
-    );
-    const usernameInput = candidates.find((el) => {
-      if (!isVisibleInput(el) || el === passwordInput) return false;
-      return el.compareDocumentPosition(passwordInput) & Node.DOCUMENT_POSITION_FOLLOWING;
-    }) ?? null;
+  document.addEventListener("focusout", () => {
+    lastTriggeredField = null;
+  }, { capture: true });
+  function fillFields(triggeredInput, username, password) {
+    const form = triggeredInput.closest("form") ?? document.body;
+    const passwordInput = triggeredInput.type === "password" ? triggeredInput : form.querySelector('input[type="password"]');
+    let usernameInput = null;
+    if (triggeredInput.type !== "password") {
+      usernameInput = triggeredInput;
+    } else if (passwordInput) {
+      const candidates = Array.from(
+        form.querySelectorAll(
+          'input[type="text"], input[type="email"], input:not([type])'
+        )
+      );
+      usernameInput = candidates.find((el) => {
+        if (!isVisibleInput(el) || el === passwordInput) return false;
+        return el.compareDocumentPosition(passwordInput) & Node.DOCUMENT_POSITION_FOLLOWING;
+      }) ?? null;
+    }
     if (usernameInput) setNativeValue(usernameInput, username);
-    setNativeValue(passwordInput, password);
+    if (passwordInput) setNativeValue(passwordInput, password);
   }
   function setNativeValue(input, value) {
     const descriptor = Object.getOwnPropertyDescriptor(

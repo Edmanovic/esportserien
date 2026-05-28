@@ -39,6 +39,9 @@ pub struct AppState {
     pub last_vault_access: Arc<AtomicI64>,
     /// Port the IPC WebSocket server is listening on (set after startup).
     pub ipc_port: Mutex<Option<u16>>,
+    /// Random 64-char hex token written to ipc.port alongside the port number.
+    /// Clients must send it as the first WebSocket message to authenticate.
+    pub ipc_token: Mutex<Option<String>>,
 }
 
 impl Default for AppState {
@@ -60,6 +63,8 @@ impl AppState {
     #[must_use]
     pub fn new(vault_dir: PathBuf) -> Self {
         let (lock_notify_tx, _) = tokio::sync::broadcast::channel(16);
+        // Load persisted auto-lock setting; fall back to 15-minute default.
+        let autolock_minutes = Self::load_persisted_autolock(&vault_dir).unwrap_or(Some(15));
         Self {
             secrets: Mutex::new(RuntimeSecretStore::locked()),
             session: Mutex::new(None),
@@ -67,9 +72,10 @@ impl AppState {
             vault_dir,
             sync: Mutex::new(None),
             lock_notify_tx,
-            autolock_minutes: Mutex::new(Some(15)),
+            autolock_minutes: Mutex::new(autolock_minutes),
             last_vault_access: Arc::new(AtomicI64::new(0)),
             ipc_port: Mutex::new(None),
+            ipc_token: Mutex::new(None),
         }
     }
 
@@ -106,6 +112,37 @@ impl AppState {
             time::OffsetDateTime::now_utc().unix_timestamp(),
             Ordering::Release,
         );
+    }
+
+    /// Path to the persisted settings file (auto-lock timeout, etc.).
+    #[must_use]
+    pub fn settings_path(&self) -> PathBuf {
+        self.vault_dir.join("settings.json")
+    }
+
+    /// Set the auto-lock timeout in memory **and** persist it to `settings.json`.
+    /// `None` means never auto-lock.
+    pub fn set_autolock_minutes(&self, minutes: Option<u32>) {
+        if let Ok(mut m) = self.autolock_minutes.lock() {
+            *m = minutes;
+        }
+        let _ = std::fs::create_dir_all(&self.vault_dir);
+        let json = serde_json::json!({ "autolock_minutes": minutes });
+        let _ = std::fs::write(self.settings_path(), json.to_string());
+    }
+
+    /// Load persisted autolock setting from `settings.json`.
+    /// Returns `Some(None)` for "never lock", `Some(Some(n))` for n minutes,
+    /// and `None` when the file is missing or the key is absent (use default).
+    fn load_persisted_autolock(vault_dir: &PathBuf) -> Option<Option<u32>> {
+        let path = vault_dir.join("settings.json");
+        let text = std::fs::read_to_string(path).ok()?;
+        let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+        match v.get("autolock_minutes")? {
+            serde_json::Value::Null      => Some(None),
+            serde_json::Value::Number(n) => Some(n.as_u64().map(|m| m as u32)),
+            _ => None,
+        }
     }
 }
 
@@ -191,6 +228,13 @@ mod sync_state_tests {
 mod ipc_state_tests {
     use super::*;
     use std::sync::atomic::Ordering;
+
+    #[test]
+    fn ipc_token_defaults_to_none() {
+        let state = AppState::new(PathBuf::from("test-token-state"));
+        let token = state.ipc_token.lock().unwrap();
+        assert!(token.is_none(), "ipc_token should start as None");
+    }
 
     #[test]
     fn touch_vault_access_updates_timestamp() {

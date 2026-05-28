@@ -40,13 +40,36 @@ export function detectSuspiciousDomain(hostname: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Password-field detection
+// Login-field detection (password OR username/email adjacent to a password field)
 // ---------------------------------------------------------------------------
 
 function isPasswordField(input: HTMLInputElement): boolean {
   if (input.type === "password") return true;
   const ac = (input.getAttribute("autocomplete") ?? "").toLowerCase();
   return ac.includes("current-password") || ac.includes("new-password");
+}
+
+function isUsernameField(input: HTMLInputElement): boolean {
+  if (input.type === "password") return false;
+  const ac   = (input.getAttribute("autocomplete") ?? "").toLowerCase();
+  const name = (input.name  ?? "").toLowerCase();
+  const id   = (input.id    ?? "").toLowerCase();
+
+  const looksLikeUsername =
+    input.type === "email" ||
+    ac.includes("username") ||
+    ac.includes("email") ||
+    /user|email|login|account|mail/i.test(name + " " + id);
+
+  if (!looksLikeUsername) return false;
+
+  // Only show for username fields when a password field exists in the same form/page
+  const scope = input.closest("form") ?? document.body;
+  return !!scope.querySelector('input[type="password"]');
+}
+
+function isLoginField(input: HTMLInputElement): boolean {
+  return isPasswordField(input) || isUsernameField(input);
 }
 
 // ---------------------------------------------------------------------------
@@ -100,78 +123,107 @@ function sendToBg(
 }
 
 // ---------------------------------------------------------------------------
-// Click listener — entry point
+// Trigger handler — fires on focusin (covers click, tab, programmatic focus)
 // ---------------------------------------------------------------------------
+
+// Debounce: skip if we just showed a dropdown for this exact element
+let lastTriggeredField: HTMLInputElement | null = null;
+
+async function handleLoginFieldActivation(target: HTMLInputElement, clientX = 0, clientY = 0): Promise<void> {
+  if (!isLoginField(target)) return;
+  if (target === lastTriggeredField) return; // already showing for this field
+  lastTriggeredField = target;
+
+  // Security guards
+  if (detectFullscreenOverlay()) return;
+  if (clientX || clientY) {
+    const overlayResult = checkOverlay(clientX, clientY, target);
+    if (!overlayResult.safe) return;
+  }
+
+  const origin = window.location.origin;
+  let topLevelOrigin = origin;
+  try { topLevelOrigin = window.top?.location.origin ?? origin; }
+  catch { topLevelOrigin = "cross-origin"; }
+
+  if (topLevelOrigin !== origin) return; // cross-origin iframe
+  if (detectSuspiciousDomain(window.location.hostname)) return;
+  if (!isVisibleInput(target)) return;
+
+  const response = await sendToBg({ type: "find_credentials", origin });
+  if (response.type !== "credentials") return;
+
+  const items = response.items as CredentialItem[];
+  if (items.length === 0) return;
+
+  showDropdown(target, items, async (id) => {
+    const fillResponse = await sendToBg({ type: "fill_credential", id });
+    if (fillResponse.type === "fill_data") {
+      fillFields(target, fillResponse.username as string, fillResponse.password as string);
+    }
+  });
+}
+
+document.addEventListener(
+  "focusin",
+  async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) return;
+    await handleLoginFieldActivation(target);
+  },
+  { capture: true }
+);
 
 document.addEventListener(
   "click",
   async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) return;
-    if (!isPasswordField(target)) return;
-
-    // Security guards
-    if (detectFullscreenOverlay()) return;
-    const overlayResult = checkOverlay(event.clientX, event.clientY, target);
-    if (!overlayResult.safe) return;
-
-    const origin = window.location.origin;
-    let topLevelOrigin = origin;
-    try { topLevelOrigin = window.top?.location.origin ?? origin; }
-    catch { topLevelOrigin = "cross-origin"; }
-
-    if (topLevelOrigin !== origin) return; // cross-origin iframe
-    if (detectSuspiciousDomain(window.location.hostname)) return;
-    if (!isVisibleInput(target)) return;
-
-    const response = await sendToBg({ type: "find_credentials", origin });
-    if (response.type !== "credentials") return;
-
-    const items = response.items as CredentialItem[];
-    if (items.length === 0) return;
-
-    showDropdown(target, items, async (id) => {
-      const fillResponse = await sendToBg({ type: "fill_credential", id });
-      if (fillResponse.type === "fill_data") {
-        fillFields(
-          target,
-          fillResponse.username as string,
-          fillResponse.password as string
-        );
-      }
-    });
+    lastTriggeredField = null; // allow re-trigger on explicit click
+    await handleLoginFieldActivation(target, event.clientX, event.clientY);
   },
   { capture: true }
 );
+
+// Reset when dropdown is dismissed (blur clears the last-triggered cache)
+document.addEventListener("focusout", () => { lastTriggeredField = null; }, { capture: true });
 
 // ---------------------------------------------------------------------------
 // Field filling
 // ---------------------------------------------------------------------------
 
 function fillFields(
-  passwordInput: HTMLInputElement,
+  triggeredInput: HTMLInputElement,
   username: string,
   password: string
 ): void {
-  const form = passwordInput.closest("form") ?? document.body;
-  const candidates = Array.from(
-    form.querySelectorAll<HTMLInputElement>(
-      'input[type="text"], input[type="email"], input:not([type])'
-    )
-  );
+  const form = triggeredInput.closest("form") ?? document.body;
 
-  // First visible input that appears before the password field in DOM order
-  const usernameInput =
-    candidates.find((el) => {
+  // Resolve password field — either the triggered input itself or the first one in form
+  const passwordInput: HTMLInputElement | null =
+    triggeredInput.type === "password"
+      ? triggeredInput
+      : form.querySelector<HTMLInputElement>('input[type="password"]');
+
+  // Resolve username field — either the triggered input (if it's a username field)
+  // or the first visible text/email input before the password field
+  let usernameInput: HTMLInputElement | null = null;
+  if (triggeredInput.type !== "password") {
+    usernameInput = triggeredInput;
+  } else if (passwordInput) {
+    const candidates = Array.from(
+      form.querySelectorAll<HTMLInputElement>(
+        'input[type="text"], input[type="email"], input:not([type])'
+      )
+    );
+    usernameInput = candidates.find((el) => {
       if (!isVisibleInput(el) || el === passwordInput) return false;
-      return (
-        el.compareDocumentPosition(passwordInput) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-      );
+      return el.compareDocumentPosition(passwordInput) & Node.DOCUMENT_POSITION_FOLLOWING;
     }) ?? null;
+  }
 
   if (usernameInput) setNativeValue(usernameInput, username);
-  setNativeValue(passwordInput, password);
+  if (passwordInput) setNativeValue(passwordInput, password);
 }
 
 /** Set input value in a way that React / Vue / Angular detect as a real change. */

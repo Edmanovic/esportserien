@@ -773,7 +773,7 @@ pub fn set_autolock_timeout(minutes: Option<u32>, state: State<AppState>) -> Res
     if let Some(0) = minutes {
         return Err("autolock timeout must be at least 1 minute".to_string());
     }
-    *state.autolock_minutes.lock().map_err(|e| e.to_string())? = minutes;
+    state.set_autolock_minutes(minutes);
     Ok(())
 }
 

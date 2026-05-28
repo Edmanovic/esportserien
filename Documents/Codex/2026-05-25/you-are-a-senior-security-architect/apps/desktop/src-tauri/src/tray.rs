@@ -81,7 +81,7 @@ fn handle_menu_event(app: &tauri::AppHandle, id: &str) {
                 _ => return,
             };
             let state = app.state::<AppState>();
-            if let Ok(mut m) = state.autolock_minutes.lock() { *m = minutes; };
+            state.set_autolock_minutes(minutes);
         }
         _ => {}
     }
