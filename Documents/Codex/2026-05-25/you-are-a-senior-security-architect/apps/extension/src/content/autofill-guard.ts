@@ -55,15 +55,22 @@ function isUsernameField(input: HTMLInputElement): boolean {
   const name = (input.name  ?? "").toLowerCase();
   const id   = (input.id    ?? "").toLowerCase();
 
-  const looksLikeUsername =
+  // Strong semantic signals — reliable enough on their own, no password sibling needed.
+  // This handles multi-step login flows (Microsoft, Google, Apple…) where the
+  // password field only appears after the user clicks "Next".
+  const strongSignal =
     input.type === "email" ||
     ac.includes("username") ||
-    ac.includes("email") ||
-    /user|email|login|account|mail/i.test(name + " " + id);
+    ac.includes("email");
 
-  if (!looksLikeUsername) return false;
+  if (strongSignal) return true;
 
-  // Only show for username fields when a password field exists in the same form/page
+  // Weaker heuristic: name/id pattern match.
+  // Require a password sibling to avoid triggering on unrelated text inputs
+  // (search boxes, comment forms, etc.).
+  const weakSignal = /user|email|login|account|mail/i.test(name + " " + id);
+  if (!weakSignal) return false;
+
   const scope = input.closest("form") ?? document.body;
   return !!scope.querySelector('input[type="password"]');
 }
