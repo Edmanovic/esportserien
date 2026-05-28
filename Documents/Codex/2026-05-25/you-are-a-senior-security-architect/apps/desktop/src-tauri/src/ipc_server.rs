@@ -9,8 +9,29 @@ use crate::commands::{load_contents, load_meta, Credential};
 use crate::state::AppState;
 use tauri::Manager;
 
+/// Generates a cryptographically random 64-character lowercase hex token (32 bytes).
+pub fn generate_token() -> String {
+    // Two UUID v4 values each contribute 16 bytes of OS-sourced randomness.
+    let a = uuid::Uuid::new_v4();
+    let b = uuid::Uuid::new_v4();
+    let mut bytes = [0u8; 32];
+    bytes[..16].copy_from_slice(a.as_bytes());
+    bytes[16..].copy_from_slice(b.as_bytes());
+    hex::encode(bytes)
+}
+
+/// Returns true iff `msg` is a valid `{"type":"auth","token":"<expected>"}` message.
+pub fn is_valid_auth_message(msg: &str, expected_token: &str) -> bool {
+    let v: serde_json::Value = match serde_json::from_str(msg) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    v.get("type").and_then(|t| t.as_str()) == Some("auth")
+        && v.get("token").and_then(|t| t.as_str()) == Some(expected_token)
+}
+
 /// Start the IPC server.  Returns the port that was bound.
-/// Writes `<vault_dir>/ipc.port` and spawns background tasks.
+/// Writes `<vault_dir>/ipc.port` in "port:token" format and spawns background tasks.
 pub async fn run_ipc_server(app: tauri::AppHandle) -> Result<u16, String> {
     let state = app.state::<AppState>();
     let vault_dir = state.vault_dir.clone();
@@ -20,9 +41,11 @@ pub async fn run_ipc_server(app: tauri::AppHandle) -> Result<u16, String> {
         .map_err(|e| e.to_string())?;
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
 
+    let token = generate_token();
+
     std::fs::create_dir_all(&vault_dir).map_err(|e| e.to_string())?;
     let port_path = vault_dir.join("ipc.port");
-    std::fs::write(&port_path, port.to_string()).map_err(|e| e.to_string())?;
+    std::fs::write(&port_path, format!("{port}:{token}")).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -30,8 +53,9 @@ pub async fn run_ipc_server(app: tauri::AppHandle) -> Result<u16, String> {
         std::fs::set_permissions(&port_path, perms).map_err(|e| e.to_string())?;
     }
     *state.ipc_port.lock().map_err(|e| e.to_string())? = Some(port);
+    *state.ipc_token.lock().map_err(|e| e.to_string())? = Some(token.clone());
 
-    tauri::async_runtime::spawn(accept_loop(listener, app, port_path));
+    tauri::async_runtime::spawn(accept_loop(listener, app, port_path, token));
     Ok(port)
 }
 
@@ -39,7 +63,9 @@ async fn accept_loop(
     listener: tokio::net::TcpListener,
     app: tauri::AppHandle,
     port_path: std::path::PathBuf,
+    token: String,
 ) {
+    let token = std::sync::Arc::new(token);
     loop {
         let (stream, addr) = match listener.accept().await {
             Ok(v) => v,
@@ -49,7 +75,8 @@ async fn accept_loop(
             continue; // reject non-loopback connections
         }
         let app = app.clone();
-        tauri::async_runtime::spawn(handle_connection(stream, app));
+        let token = token.clone();
+        tauri::async_runtime::spawn(handle_connection(stream, app, token));
     }
     let _ = std::fs::remove_file(&port_path);
     {
@@ -60,7 +87,11 @@ async fn accept_loop(
     }
 }
 
-async fn handle_connection(stream: tokio::net::TcpStream, app: tauri::AppHandle) {
+async fn handle_connection(
+    stream: tokio::net::TcpStream,
+    app: tauri::AppHandle,
+    expected_token: std::sync::Arc<String>,
+) {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
 
@@ -69,6 +100,23 @@ async fn handle_connection(stream: tokio::net::TcpStream, app: tauri::AppHandle)
         Err(_) => return,
     };
     let (mut sink, mut stream) = ws.split();
+
+    // Require a valid auth message as the very first message within 1 second.
+    let auth_ok = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        stream.next(),
+    )
+    .await;
+    match auth_ok {
+        Ok(Some(Ok(Message::Text(msg)))) if is_valid_auth_message(msg.as_str(), &expected_token) => {}
+        _ => {
+            let _ = sink.send(Message::Text(
+                r#"{"type":"error","code":"auth-required"}"#.into(),
+            )).await;
+            return;
+        }
+    }
+
     let state = app.state::<AppState>();
     let mut lock_rx = state.lock_notify_tx.subscribe();
 
@@ -127,6 +175,7 @@ fn handle_message(text: &str, state: &AppState) -> String {
         _ if !is_unlocked => serde_json::json!({"type": "error", "code": "vault-locked"}),
         "find_credentials" => handle_find_credentials(&v, state),
         "get_credential"   => handle_get_credential(&v, state),
+        "list_credentials" => handle_list_credentials(state),
         "lock" => {
             if let Ok(mut s) = state.secrets.lock() { s.lock(); }
             if let Ok(mut s) = state.session.lock() { *s = None; }
@@ -218,6 +267,42 @@ fn handle_find_credentials(v: &serde_json::Value, state: &AppState) -> serde_jso
     serde_json::json!({"type": "credentials", "items": items})
 }
 
+fn handle_list_credentials(state: &AppState) -> serde_json::Value {
+    let key_bytes = {
+        let secrets = match state.secrets.lock() {
+            Ok(s) => s,
+            Err(_) => return serde_json::json!({"type":"error","code":"state-error"}),
+        };
+        let key = match secrets.vault_key() {
+            Ok(k) => k,
+            Err(_) => return serde_json::json!({"type":"error","code":"vault-locked"}),
+        };
+        let mut kb = [0u8; 32];
+        kb.copy_from_slice(key.expose_secret());
+        kb
+    };
+    let vault_key = espass_crypto_core::VaultKey::from_bytes(key_bytes);
+
+    let contents = match load_contents(&vault_key, state) {
+        Ok(c) => c,
+        Err(e) => return serde_json::json!({"type":"error","code":"load-failed","message":e}),
+    };
+
+    let items: Vec<serde_json::Value> = contents
+        .credentials
+        .iter()
+        .map(|c| serde_json::json!({
+            "id":       c.id,
+            "title":    c.title,
+            "username": c.username,
+            "url":      c.url,
+        }))
+        .collect();
+
+    state.touch_vault_access();
+    serde_json::json!({"type": "credentials_list", "items": items})
+}
+
 fn handle_get_credential(v: &serde_json::Value, state: &AppState) -> serde_json::Value {
     let id = match v.get("id").and_then(|i| i.as_str()) {
         Some(i) => i.to_string(),
@@ -304,6 +389,48 @@ fn credential_matches_origin(cred: &Credential, origin: &str) -> bool {
 mod tests {
     use super::*;
 
+    // --- Token generation tests ---
+
+    #[test]
+    fn generate_token_returns_64_char_hex() {
+        let token = generate_token();
+        assert_eq!(token.len(), 64, "32 bytes must encode to 64 hex chars");
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()), "must be lowercase hex");
+    }
+
+    #[test]
+    fn generate_token_is_random() {
+        let t1 = generate_token();
+        let t2 = generate_token();
+        assert_ne!(t1, t2, "consecutive tokens must differ");
+    }
+
+    // --- Auth message validation tests ---
+
+    #[test]
+    fn is_valid_auth_accepts_correct_token() {
+        let token = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+        let msg = format!(r#"{{"type":"auth","token":"{token}"}}"#);
+        assert!(is_valid_auth_message(&msg, token));
+    }
+
+    #[test]
+    fn is_valid_auth_rejects_wrong_token() {
+        let msg = r#"{"type":"auth","token":"wrongtoken"}"#;
+        assert!(!is_valid_auth_message(msg, "correcttoken"));
+    }
+
+    #[test]
+    fn is_valid_auth_rejects_non_auth_type() {
+        let msg = r#"{"type":"status","token":"abc123"}"#;
+        assert!(!is_valid_auth_message(msg, "abc123"));
+    }
+
+    #[test]
+    fn is_valid_auth_rejects_invalid_json() {
+        assert!(!is_valid_auth_message("not-json", "abc123"));
+    }
+
     #[test]
     fn etld1_extracts_registered_domain() {
         assert_eq!(extract_etld1("https://app.github.com"), Some("github.com".to_string()));
@@ -320,6 +447,28 @@ mod tests {
         assert_eq!(extract_etld1("https://www.bank.co.uk"), Some("bank.co.uk".to_string()));
         // A bare public suffix has no registered domain.
         assert_eq!(extract_etld1("https://co.uk"), None);
+    }
+
+    #[test]
+    fn etld1_github_io_sites_do_not_cross_match() {
+        // github.io is a public suffix (GitHub Pages hosting). A naive
+        // last-two-labels heuristic collapses victim.github.io and
+        // attacker.github.io to the same "github.io", leaking credentials
+        // across unrelated GitHub Pages sites. PSL matching keeps them apart.
+        assert_eq!(
+            extract_etld1("https://victim.github.io"),
+            Some("victim.github.io".to_string()),
+        );
+        assert_eq!(
+            extract_etld1("https://attacker.github.io"),
+            Some("attacker.github.io".to_string()),
+        );
+        assert_ne!(
+            extract_etld1("https://victim.github.io"),
+            extract_etld1("https://attacker.github.io"),
+        );
+        // A bare public suffix has no registered domain.
+        assert_eq!(extract_etld1("https://github.io"), None);
     }
 
     #[test]
@@ -352,5 +501,13 @@ mod tests {
         };
         assert!(!credential_matches_origin(&cred, "https://evil.com"));
         assert!(!credential_matches_origin(&cred, "http://github.com"));
+    }
+
+    #[test]
+    fn list_credentials_response_has_correct_type() {
+        let json = r#"{"type":"credentials_list","items":[]}"#;
+        let v: serde_json::Value = serde_json::from_str(json).unwrap();
+        assert_eq!(v["type"], "credentials_list");
+        assert!(v["items"].is_array());
     }
 }
