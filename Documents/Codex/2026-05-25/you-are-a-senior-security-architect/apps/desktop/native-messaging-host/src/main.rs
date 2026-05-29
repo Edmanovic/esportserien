@@ -28,7 +28,7 @@ async fn main() {
 }
 
 async fn run() -> Result<(), &'static str> {
-    let port = read_ipc_port()?;
+    let (port, token) = read_ipc_credentials()?;
     let url = format!("ws://127.0.0.1:{port}");
 
     let (ws, _) = tokio_tungstenite::connect_async(&url)
@@ -36,6 +36,12 @@ async fn run() -> Result<(), &'static str> {
         .map_err(|_| "desktop-unavailable")?;
 
     let (mut ws_sink, mut ws_stream) = ws.split();
+
+    // Authenticate immediately — server rejects connections without a valid token.
+    ws_sink
+        .send(Message::Text(make_auth_message(&token).into()))
+        .await
+        .map_err(|_| "websocket-write-error")?;
     let mut stdin  = tokio::io::stdin();
     let mut stdout = tokio::io::stdout();
 
@@ -71,16 +77,29 @@ async fn run() -> Result<(), &'static str> {
     Ok(())
 }
 
-/// Read the IPC port from the file written by the Tauri desktop app.
-/// Windows-only: uses `%APPDATA%\espass\ipc.port`.
-/// See `AppState::default()` in the desktop crate for cross-platform path logic.
-fn read_ipc_port() -> Result<u16, &'static str> {
+/// Parse a "port:token" string from the ipc.port file content.
+/// Returns `None` if the format is invalid or the port is not a valid u16.
+pub fn parse_ipc_file(content: &str) -> Option<(u16, String)> {
+    let trimmed = content.trim();
+    let (port_str, token) = trimmed.split_once(':')?;
+    let port = port_str.parse::<u16>().ok()?;
+    Some((port, token.to_string()))
+}
+
+/// Build the JSON auth message sent as the first WebSocket message.
+pub fn make_auth_message(token: &str) -> String {
+    serde_json::json!({"type": "auth", "token": token}).to_string()
+}
+
+/// Read the IPC port and auth token from the file written by the Tauri desktop app.
+/// File format: "port:token\n". Windows uses `%APPDATA%\espass\ipc.port`.
+fn read_ipc_credentials() -> Result<(u16, String), &'static str> {
     let appdata = std::env::var("APPDATA").map_err(|_| "desktop-unavailable")?;
     let path = std::path::Path::new(&appdata)
         .join("espass")
         .join("ipc.port");
     let text = std::fs::read_to_string(&path).map_err(|_| "desktop-unavailable")?;
-    text.trim().parse::<u16>().map_err(|_| "desktop-unavailable")
+    parse_ipc_file(&text).ok_or("desktop-unavailable")
 }
 
 /// Read one length-prefixed message from `reader`.
@@ -123,6 +142,47 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- IPC file parsing tests ---
+
+    #[test]
+    fn parse_ipc_file_valid_format() {
+        let (port, token) = parse_ipc_file("8080:deadbeef1234").unwrap();
+        assert_eq!(port, 8080);
+        assert_eq!(token, "deadbeef1234");
+    }
+
+    #[test]
+    fn parse_ipc_file_trims_whitespace() {
+        let (port, token) = parse_ipc_file("  9000:mytoken123  \n").unwrap();
+        assert_eq!(port, 9000);
+        assert_eq!(token, "mytoken123");
+    }
+
+    #[test]
+    fn parse_ipc_file_rejects_port_only() {
+        assert!(parse_ipc_file("8080").is_none(), "missing token must return None");
+    }
+
+    #[test]
+    fn parse_ipc_file_rejects_bad_port() {
+        assert!(parse_ipc_file("notaport:abc123").is_none());
+    }
+
+    #[test]
+    fn parse_ipc_file_rejects_empty() {
+        assert!(parse_ipc_file("").is_none());
+    }
+
+    // --- Auth message format tests ---
+
+    #[test]
+    fn make_auth_message_correct_format() {
+        let msg = make_auth_message("mytoken");
+        let v: serde_json::Value = serde_json::from_str(&msg).unwrap();
+        assert_eq!(v["type"], "auth");
+        assert_eq!(v["token"], "mytoken");
+    }
 
     #[tokio::test]
     async fn native_msg_round_trip() {
