@@ -5,15 +5,20 @@
     if (!top) {
       return { safe: false, reason: "no-element-at-point" };
     }
-    if (!expectedContainer.contains(top) && top !== expectedContainer) {
-      return {
-        safe: false,
-        reason: `overlay-detected:${top.tagName.toLowerCase()}`
-      };
+    if (window.getComputedStyle(top).pointerEvents === "none") {
+      return { safe: true };
     }
-    return { safe: true };
+    if (top === expectedContainer || // exact match
+    expectedContainer.contains(top) || // top is a child of input (future-proofing)
+    top.contains(expectedContainer)) {
+      return { safe: true };
+    }
+    return {
+      safe: false,
+      reason: `overlay-detected:${top.tagName.toLowerCase()}`
+    };
   }
-  function detectFullscreenOverlay() {
+  function detectFullscreenOverlay(inputEl) {
     const viewportArea = window.innerWidth * window.innerHeight;
     if (viewportArea === 0) return false;
     const fixed = Array.from(document.querySelectorAll("*")).filter((el) => {
@@ -21,15 +26,32 @@
       return style.position === "fixed" || style.position === "sticky";
     });
     return fixed.some((el) => {
+      if (inputEl && el.contains(inputEl)) return false;
       const rect = el.getBoundingClientRect();
       const area = rect.width * rect.height;
-      return area / viewportArea > 0.8;
+      if (area / viewportArea <= 0.8) return false;
+      const cx = rect.left + rect.width / 2;
+      const cy = rect.top + rect.height / 2;
+      const topEl = document.elementFromPoint(cx, cy);
+      return topEl !== null && (el === topEl || el.contains(topEl));
     });
   }
 
   // apps/extension/src/content/dropdown.ts
+  var _AVATAR_HUES = [220, 260, 170, 30, 340, 200, 290, 140];
+  function _avatarColor(title) {
+    let h = 0;
+    for (const ch of title) h = h * 31 + ch.charCodeAt(0) & 255;
+    return `hsl(${_AVATAR_HUES[h % _AVATAR_HUES.length]}, 55%, 55%)`;
+  }
+  function _avatarLetter(title) {
+    return (title.trim()[0] ?? "?").toUpperCase();
+  }
   var currentHost = null;
   var cleanupFns = [];
+  function isDropdownVisible() {
+    return currentHost !== null;
+  }
   function dismissDropdown() {
     for (const fn of cleanupFns) fn();
     cleanupFns = [];
@@ -50,29 +72,74 @@
       border: 1px solid #d0d5dd;
       border-radius: 8px;
       box-shadow: 0 8px 24px rgba(0,0,0,.12);
-      min-width: 220px;
+      min-width: 260px;
       max-width: 380px;
       overflow: hidden;
+      display: flex;
+      flex-direction: column;
       font-family: system-ui, -apple-system, sans-serif;
       font-size: 14px;
     }
     .item {
       display: flex;
-      flex-direction: column;
+      flex-direction: row;
       padding: 8px 14px;
       cursor: pointer;
       outline: none;
       user-select: none;
+      gap: 8px;
     }
     .item:hover, .item.active {
       background: #f0f4ff;
     }
     .item-title  { font-weight: 600; color: #101828; }
     .item-user   { font-size: 12px; color: #667085; margin-top: 1px; }
+    .item-text   { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+    .brand-strip {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 10px;
+      background: #1e2232;
+      border-bottom: 1px solid #2a2e42;
+      font-size: 11px;
+      flex-shrink: 0;
+    }
+    .brand-strip__name { font-weight: 600; color: #7c85f0; }
+    .brand-strip__hint { color: #7a7f9a; }
+
+    .avatar {
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; color: #fff; flex-shrink: 0;
+    }
+
+    .item-list { overflow-y: auto; max-height: 280px; flex: 1; }
+
+    .kb-hint {
+      padding: 4px 10px;
+      text-align: center;
+      font-size: 10px;
+      color: #7a7f9a;
+      border-top: 1px solid #2a2e42;
+      background: #1e2232;
+      flex-shrink: 0;
+    }
   `;
-    shadow.appendChild(style);
     const dropdown = document.createElement("div");
     dropdown.className = "dropdown";
+    const brandStrip = document.createElement("div");
+    brandStrip.className = "brand-strip";
+    brandStrip.innerHTML = '<span class="brand-strip__name">\u{1F511} ESPASS</span><span class="brand-strip__hint">ESC to close</span>';
+    const itemList = document.createElement("div");
+    itemList.className = "item-list";
+    const kbHint = document.createElement("div");
+    kbHint.className = "kb-hint";
+    kbHint.textContent = "\u2191\u2193 navigate \xB7 Enter fill \xB7 Esc dismiss";
+    dropdown.appendChild(brandStrip);
+    dropdown.appendChild(itemList);
+    dropdown.appendChild(kbHint);
+    shadow.appendChild(style);
     shadow.appendChild(dropdown);
     const els = [];
     let activeIdx = -1;
@@ -86,13 +153,17 @@
       el.className = "item";
       el.tabIndex = 0;
       el.setAttribute("role", "option");
-      el.innerHTML = `<span class="item-title">\u{1F511} ${esc(item.title)}</span><span class="item-user">${esc(item.username)}</span>`;
+      const color = _avatarColor(item.title);
+      const letter = _avatarLetter(item.title);
+      el.innerHTML = `<div class="avatar" data-avatar-color="${color}">${esc(letter)}</div><div class="item-text"><span class="item-title">${esc(item.title)}</span><span class="item-user">${esc(item.username)}</span></div>`;
       el.addEventListener("click", () => {
         dismissDropdown();
         onSelect(item.id);
       });
       el.addEventListener("mouseenter", () => setActive(i));
-      dropdown.appendChild(el);
+      itemList.appendChild(el);
+      const avatarEl = el.querySelector(".avatar");
+      if (avatarEl) avatarEl.style.background = color;
       els.push(el);
     });
     const rect = anchor.getBoundingClientRect();
@@ -153,8 +224,10 @@
     const ac = (input.getAttribute("autocomplete") ?? "").toLowerCase();
     const name = (input.name ?? "").toLowerCase();
     const id = (input.id ?? "").toLowerCase();
-    const looksLikeUsername = input.type === "email" || ac.includes("username") || ac.includes("email") || /user|email|login|account|mail/i.test(name + " " + id);
-    if (!looksLikeUsername) return false;
+    const strongSignal = input.type === "email" || ac.includes("username") || ac.includes("email");
+    if (strongSignal) return true;
+    const weakSignal = /user|email|login|account|mail/i.test(name + " " + id);
+    if (!weakSignal) return false;
     const scope = input.closest("form") ?? document.body;
     return !!scope.querySelector('input[type="password"]');
   }
@@ -197,12 +270,10 @@
       getBgPort().postMessage(msg);
     });
   }
-  var lastTriggeredField = null;
   async function handleLoginFieldActivation(target, clientX = 0, clientY = 0) {
     if (!isLoginField(target)) return;
-    if (target === lastTriggeredField) return;
-    lastTriggeredField = target;
-    if (detectFullscreenOverlay()) return;
+    if (isDropdownVisible()) return;
+    if (detectFullscreenOverlay(target)) return;
     if (clientX || clientY) {
       const overlayResult = checkOverlay(clientX, clientY, target);
       if (!overlayResult.safe) return;
@@ -242,14 +313,10 @@
     async (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement)) return;
-      lastTriggeredField = null;
       await handleLoginFieldActivation(target, event.clientX, event.clientY);
     },
     { capture: true }
   );
-  document.addEventListener("focusout", () => {
-    lastTriggeredField = null;
-  }, { capture: true });
   function fillFields(triggeredInput, username, password) {
     const form = triggeredInput.closest("form") ?? document.body;
     const passwordInput = triggeredInput.type === "password" ? triggeredInput : form.querySelector('input[type="password"]');

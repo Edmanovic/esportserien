@@ -3,12 +3,15 @@ var HOST_NAME = "com.espass.desktop";
 var nativePort = null;
 var pendingRequests = /* @__PURE__ */ new Map();
 var credentialCache = /* @__PURE__ */ new Map();
+var credentialListCache = null;
 function getOrConnectNativeHost() {
   if (nativePort) return nativePort;
   nativePort = chrome.runtime.connectNative(HOST_NAME);
   nativePort.onMessage.addListener(handleNativeMessage);
   nativePort.onDisconnect.addListener(() => {
     nativePort = null;
+    credentialCache.clear();
+    credentialListCache = null;
     for (const [id, pending] of pendingRequests) {
       clearTimeout(pending.timeoutId);
       pending.resolve({ type: "error", code: "native-host-disconnected" });
@@ -35,6 +38,7 @@ function handleNativeMessage(msg) {
   const m = msg;
   if (m.type === "vault_locked") {
     credentialCache.clear();
+    credentialListCache = null;
     broadcastToContentPorts({ type: "vault_locked" });
     return;
   }
@@ -114,6 +118,7 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.runtime.onMessage.addListener(
   (message, _sender, sendResponse) => {
     if (!message || typeof message.type !== "string") return false;
+    const fromExtensionPage = _sender.tab === void 0;
     switch (message.type) {
       case "get_vault_status": {
         resolveVaultStatus().then(sendResponse);
@@ -128,7 +133,60 @@ chrome.runtime.onMessage.addListener(
       }
       case "lock": {
         credentialCache.clear();
+        credentialListCache = null;
         sendToNativeHost({ type: "lock" }).then(sendResponse);
+        return true;
+      }
+      case "list_credentials": {
+        if (!fromExtensionPage) {
+          sendResponse({ type: "error", code: "forbidden" });
+          return true;
+        }
+        if (credentialListCache) {
+          sendResponse({ type: "credentials_list", items: credentialListCache });
+        } else {
+          sendToNativeHost({ type: "list_credentials" }).then((raw) => {
+            if (raw.type === "credentials_list") {
+              credentialListCache = raw.items;
+            }
+            sendResponse(raw);
+          });
+        }
+        return true;
+      }
+      case "find_credentials": {
+        if (!fromExtensionPage) {
+          sendResponse({ type: "error", code: "forbidden" });
+          return true;
+        }
+        if (typeof message.origin !== "string") {
+          sendResponse({ type: "error", code: "bad-request" });
+          return true;
+        }
+        const origin = message.origin;
+        const cached = credentialCache.get(origin);
+        if (cached) {
+          sendResponse({ type: "credentials", items: cached });
+        } else {
+          sendToNativeHost({ type: "find_credentials", origin }).then((raw) => {
+            if (raw.type === "credentials") {
+              credentialCache.set(origin, raw.items);
+            }
+            sendResponse(raw);
+          });
+        }
+        return true;
+      }
+      case "get_credential": {
+        if (!fromExtensionPage) {
+          sendResponse({ type: "error", code: "forbidden" });
+          return true;
+        }
+        if (typeof message.id !== "string") {
+          sendResponse({ type: "error", code: "bad-request" });
+          return true;
+        }
+        sendToNativeHost({ type: "get_credential", id: message.id }).then(sendResponse);
         return true;
       }
       default:
